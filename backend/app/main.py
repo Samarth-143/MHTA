@@ -64,7 +64,8 @@ async def predict(file: UploadFile = File(...)):
         shutil.copyfileobj(file.file, buffer)
 
     try:
-        emotion = predict_emotion(file_location)
+        prediction = predict_emotion(file_location)
+        emotion = prediction["emotion"]
         insert_emotion(emotion)
 
         history = fetch_emotions()
@@ -73,6 +74,9 @@ async def predict(file: UploadFile = File(...)):
 
         return {
             "emotion": emotion,
+            "raw_emotion": prediction["raw_emotion"],
+            "confidence": prediction["confidence"],
+            "uncertain": prediction["uncertain"],
             "trend": trend,
             "message": f"Your recent emotional pattern suggests: {trend}",
         }

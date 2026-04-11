@@ -40,7 +40,23 @@ def load_emotion_model():
 def predict_emotion(file_path):
     if model is None:
         raise RuntimeError("Model not loaded. Train the model first using train_model.py")
+
+    min_confidence = float(os.getenv("MIN_CONFIDENCE", "0.45"))
     features = extract_features(file_path)
     features = np.expand_dims(features, axis=0)
-    prediction = model.predict(features)
-    return EMOTIONS[np.argmax(prediction)]
+    prediction = model.predict(features, verbose=0)[0]
+
+    top_index = int(np.argmax(prediction))
+    top_confidence = float(prediction[top_index])
+    emotion = EMOTIONS[top_index]
+    uncertain = top_confidence < min_confidence
+
+    if uncertain:
+        emotion = "neutral"
+
+    return {
+        "emotion": emotion,
+        "raw_emotion": EMOTIONS[top_index],
+        "confidence": round(top_confidence, 4),
+        "uncertain": uncertain,
+    }

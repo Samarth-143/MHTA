@@ -1,6 +1,6 @@
 ---
 title: MHTA Backend
-emoji: ":brain:"
+emoji: "🧠"
 colorFrom: blue
 colorTo: green
 sdk: docker

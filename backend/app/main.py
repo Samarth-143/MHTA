@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import shutil
 import os
@@ -55,24 +55,34 @@ def health_check():
 
 @app.post("/predict/")
 async def predict(file: UploadFile = File(...)):
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file received.")
+
     file_location = os.path.join(str(TEMP_DIR), file.filename)
 
     with open(file_location, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    emotion = predict_emotion(file_location)
-    insert_emotion(emotion)
+    try:
+        emotion = predict_emotion(file_location)
+        insert_emotion(emotion)
 
-    history = fetch_emotions()
-    emotions_only = [e[0] for e in history]
+        history = fetch_emotions()
+        emotions_only = [e[0] for e in history]
+        trend = analyze_trend(emotions_only)
 
-    trend = analyze_trend(emotions_only)
-
-    return {
-        "emotion": emotion,
-        "trend": trend,
-        "message": f"Your recent emotional pattern suggests: {trend}",
-    }
+        return {
+            "emotion": emotion,
+            "trend": trend,
+            "message": f"Your recent emotional pattern suggests: {trend}",
+        }
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Audio processing failed: {exc}") from exc
+    finally:
+        if os.path.exists(file_location):
+            os.remove(file_location)
 
 
 @app.get("/history/")

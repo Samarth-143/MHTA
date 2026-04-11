@@ -1,3 +1,13 @@
+---
+title: MHTA Backend
+emoji: ":brain:"
+colorFrom: blue
+colorTo: green
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # Mental Health Trend Analyzer
 
 A full-stack app that analyzes emotion from voice, tracks mood trends over time, and combines diary sentiment for daily mental health insights.

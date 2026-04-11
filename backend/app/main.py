@@ -43,6 +43,16 @@ TEMP_DIR = BASE_DIR / "temp"
 os.makedirs(TEMP_DIR, exist_ok=True)
 
 
+@app.get("/")
+def root():
+    return {"status": "ok", "service": "mhta-backend"}
+
+
+@app.get("/health")
+def health_check():
+    return {"status": "healthy"}
+
+
 @app.post("/predict/")
 async def predict(file: UploadFile = File(...)):
     file_location = os.path.join(str(TEMP_DIR), file.filename)

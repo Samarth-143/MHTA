@@ -5,6 +5,7 @@ __pycache__/
 *.pyd
 
 temp/
+backend/temp/
 
 frontend-next/node_modules/
 frontend-next/.next/

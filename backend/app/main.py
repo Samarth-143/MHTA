@@ -3,10 +3,11 @@ from fastapi.middleware.cors import CORSMiddleware
 import shutil
 import os
 import sqlite3
+from pathlib import Path
 
-from app.model import load_emotion_model, predict_emotion
-from app.database import DB_PATH, init_db, insert_emotion, fetch_emotions
-from app.trend import analyze_trend
+from .model import load_emotion_model, predict_emotion
+from .database import DB_PATH, init_db, insert_emotion, fetch_emotions
+from .trend import analyze_trend
 
 app = FastAPI()
 
@@ -37,13 +38,14 @@ app.add_middleware(
 load_emotion_model()
 init_db()
 
-TEMP_DIR = "temp"
+BASE_DIR = Path(__file__).resolve().parent.parent
+TEMP_DIR = BASE_DIR / "temp"
 os.makedirs(TEMP_DIR, exist_ok=True)
 
 
 @app.post("/predict/")
 async def predict(file: UploadFile = File(...)):
-    file_location = os.path.join(TEMP_DIR, file.filename)
+    file_location = os.path.join(str(TEMP_DIR), file.filename)
 
     with open(file_location, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)

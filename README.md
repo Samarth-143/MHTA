@@ -20,10 +20,8 @@ A full-stack app that analyzes emotion from voice, tracks mood trends over time,
 
 ## Project structure
 
-- `app/` - FastAPI backend, model inference, trend logic, DB access
+- `backend/` - FastAPI backend code, model files, local DB, and Python requirements
 - `frontend-next/` - Next.js UI (Home, Diary, Calendar)
-- `models/` - trained model assets used for inference
-- `database/` - local SQLite database file(s)
 
 ## API endpoints
 
@@ -38,8 +36,8 @@ A full-stack app that analyzes emotion from voice, tracks mood trends over time,
 ```bash
 python -m venv .venv
 .venv\Scripts\activate
-pip install -r requirements.txt
-python -m uvicorn app.main:app --reload
+pip install -r backend/requirements.txt
+python -m uvicorn backend.app.main:app --reload
 ```
 
 Backend runs on `http://127.0.0.1:8000`.
@@ -71,33 +69,12 @@ NEXT_PUBLIC_SUPABASE_BUCKET=mhva-user-data
 - Keep only model files required for inference in production.
 - For deployment, point `NEXT_PUBLIC_API_BASE_URL` to your hosted backend URL.
 
-## Deployment (Vercel + Hugging Face)
+## Hugging Face Backend Variables
 
-### Backend on Hugging Face Spaces (Docker)
+In your Hugging Face Space settings, add:
 
-1. Create a new Space on Hugging Face with SDK set to Docker.
-2. Push this repository to that Space (or mirror only backend files).
-3. In Space settings, add `CORS_ORIGINS` with your frontend domain, for example:
-	- `https://your-project.vercel.app`
-4. Deploy. The app serves FastAPI with `Dockerfile` on port `7860`.
+```env
+CORS_ORIGINS=https://your-project.vercel.app
+MODEL_URL=https://raw.githubusercontent.com/Samarth-143/MHTA/main/backend/models/emotion_model.h5
+```
 
-Backend URL format:
-- `https://<space-name>.hf.space`
-
-### Frontend on Vercel
-
-1. Import this repo in Vercel.
-2. Set Root Directory to `frontend-next`.
-3. Add environment variables in Vercel project settings:
-	- `NEXT_PUBLIC_API_BASE_URL=https://<space-name>.hf.space`
-	- `NEXT_PUBLIC_SUPABASE_URL=your_supabase_url`
-	- `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your_supabase_publishable_key`
-	- `NEXT_PUBLIC_SUPABASE_BUCKET=mhva-user-data`
-4. Deploy.
-
-### Post-deploy check
-
-- Open frontend on Vercel
-- Sign in
-- Upload or record audio and confirm `/predict/` works
-- Confirm diary save/read works from Supabase storage

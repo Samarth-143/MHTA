@@ -1,0 +1,7 @@
+librosa
+numpy
+tensorflow
+streamlit
+fastapi
+uvicorn
+requests

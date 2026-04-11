@@ -70,3 +70,34 @@ NEXT_PUBLIC_SUPABASE_BUCKET=mhva-user-data
 - The training dataset is not required at runtime once the model is trained.
 - Keep only model files required for inference in production.
 - For deployment, point `NEXT_PUBLIC_API_BASE_URL` to your hosted backend URL.
+
+## Deployment (Vercel + Hugging Face)
+
+### Backend on Hugging Face Spaces (Docker)
+
+1. Create a new Space on Hugging Face with SDK set to Docker.
+2. Push this repository to that Space (or mirror only backend files).
+3. In Space settings, add `CORS_ORIGINS` with your frontend domain, for example:
+	- `https://your-project.vercel.app`
+4. Deploy. The app serves FastAPI with `Dockerfile` on port `7860`.
+
+Backend URL format:
+- `https://<space-name>.hf.space`
+
+### Frontend on Vercel
+
+1. Import this repo in Vercel.
+2. Set Root Directory to `frontend-next`.
+3. Add environment variables in Vercel project settings:
+	- `NEXT_PUBLIC_API_BASE_URL=https://<space-name>.hf.space`
+	- `NEXT_PUBLIC_SUPABASE_URL=your_supabase_url`
+	- `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your_supabase_publishable_key`
+	- `NEXT_PUBLIC_SUPABASE_BUCKET=mhva-user-data`
+4. Deploy.
+
+### Post-deploy check
+
+- Open frontend on Vercel
+- Sign in
+- Upload or record audio and confirm `/predict/` works
+- Confirm diary save/read works from Supabase storage

@@ -10,16 +10,25 @@ from app.trend import analyze_trend
 
 app = FastAPI()
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
+
+def _build_allowed_origins():
+    local_origins = [
         "http://localhost:3000",
         "http://localhost:3001",
         "http://localhost:3002",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:3001",
         "http://127.0.0.1:3002",
-    ],
+    ]
+
+    configured = os.getenv("CORS_ORIGINS", "")
+    extra_origins = [origin.strip() for origin in configured.split(",") if origin.strip()]
+    return local_origins + extra_origins
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_build_allowed_origins(),
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

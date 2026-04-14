@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
 import shutil
 import os
@@ -70,7 +70,7 @@ def _analyze_text_risk(text):
 
 
 @app.post("/predict/")
-async def predict(file: UploadFile = File(...)):
+async def predict(file: UploadFile = File(...), language: str = Form(default="en")):
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file received.")
 
@@ -85,7 +85,7 @@ async def predict(file: UploadFile = File(...)):
         transcript = ""
 
         try:
-            transcript = transcribe_audio(file_location)
+            transcript = transcribe_audio(file_location, language=language)
         except Exception:
             transcript = ""
             transcript_source = "unavailable"
@@ -118,6 +118,7 @@ async def predict(file: UploadFile = File(...)):
             "content_matches": text_risk["matched"],
             "transcript": transcript,
             "transcript_source": transcript_source,
+            "transcript_language": language,
             "flagged": flagged,
             "flag_reason": flag_reason,
             "trend": trend,

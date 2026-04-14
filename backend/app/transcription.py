@@ -1,27 +1,91 @@
 from functools import lru_cache
+import json
 import os
+from pathlib import Path
+import subprocess
+import wave
 
 try:
-    from faster_whisper import WhisperModel
+    from vosk import KaldiRecognizer, Model
 except ModuleNotFoundError:
-    WhisperModel = None
+    KaldiRecognizer = None
+    Model = None
 
 
-@lru_cache(maxsize=1)
-def _get_transcription_model():
-    if WhisperModel is None:
+def _get_model_path(language):
+    lang = (language or "en").strip().lower()
+    by_lang_key = f"VOSK_MODEL_PATH_{lang.upper()}"
+    configured = os.getenv(by_lang_key, "").strip() or os.getenv("VOSK_MODEL_PATH", "").strip()
+
+    if configured and Path(configured).exists():
+        return configured
+
+    return ""
+
+
+@lru_cache(maxsize=4)
+def _get_transcription_model(language):
+    if Model is None:
         return None
 
-    model_name = os.getenv("TRANSCRIPTION_MODEL", "base").strip() or "base"
-    compute_type = os.getenv("TRANSCRIPTION_COMPUTE_TYPE", "int8").strip() or "int8"
-    return WhisperModel(model_name, device="cpu", compute_type=compute_type)
+    model_path = _get_model_path(language)
+    if not model_path:
+        return None
+
+    return Model(model_path)
 
 
-def transcribe_audio(file_path):
-    model = _get_transcription_model()
+def transcribe_audio(file_path, language="en"):
+    if KaldiRecognizer is None:
+        return ""
+
+    model = _get_transcription_model(language)
     if model is None:
         return ""
 
-    segments, _info = model.transcribe(file_path, vad_filter=True)
-    transcript = " ".join(segment.text.strip() for segment in segments if segment.text.strip())
-    return transcript.strip()
+    source = Path(file_path)
+    converted = source.with_suffix(".vosk.wav")
+
+    try:
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-y",
+                "-i",
+                str(source),
+                "-ar",
+                "16000",
+                "-ac",
+                "1",
+                "-f",
+                "wav",
+                str(converted),
+            ],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        with wave.open(str(converted), "rb") as wav_file:
+            recognizer = KaldiRecognizer(model, wav_file.getframerate())
+            recognizer.SetWords(False)
+
+            chunks = []
+            while True:
+                data = wav_file.readframes(4000)
+                if not data:
+                    break
+
+                if recognizer.AcceptWaveform(data):
+                    part = json.loads(recognizer.Result()).get("text", "").strip()
+                    if part:
+                        chunks.append(part)
+
+            final_part = json.loads(recognizer.FinalResult()).get("text", "").strip()
+            if final_part:
+                chunks.append(final_part)
+
+        return " ".join(chunks).strip()
+    finally:
+        if converted.exists():
+            converted.unlink()

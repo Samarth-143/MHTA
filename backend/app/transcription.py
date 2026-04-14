@@ -13,7 +13,15 @@ def _get_whisper_model(language):
 
     model_name = os.getenv("TRANSCRIPTION_MODEL", "small").strip() or "small"
     compute_type = os.getenv("TRANSCRIPTION_COMPUTE_TYPE", "int8").strip() or "int8"
-    return WhisperModel(model_name, device="cpu", compute_type=compute_type)
+    download_root = os.getenv("WHISPER_DOWNLOAD_ROOT", "/opt/whisper-cache").strip() or "/opt/whisper-cache"
+    local_files_only = os.getenv("TRANSCRIPTION_LOCAL_FILES_ONLY", "true").strip().lower() == "true"
+    return WhisperModel(
+        model_name,
+        device="cpu",
+        compute_type=compute_type,
+        download_root=download_root,
+        local_files_only=local_files_only,
+    )
 
 
 def _transcribe_with_whisper(file_path, language):
@@ -40,7 +48,3 @@ def transcribe_audio(file_path, language="en"):
         return whisper_result
     except Exception:
         return {"text": "", "status": "whisper_error", "source": "whisper"}
-    try:
-        return _transcribe_with_vosk(file_path, language)
-    except Exception:
-        return {"text": "", "status": "vosk_error", "source": "vosk"}

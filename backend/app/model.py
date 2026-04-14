@@ -7,6 +7,7 @@ from tensorflow.keras.models import load_model
 from .features import extract_features
 
 EMOTIONS = ["neutral", "calm", "happy", "sad", "angry", "fear", "disgust", "surprise"]
+NEGATIVE_EMOTIONS = {"sad", "angry", "fear", "disgust"}
 BASE_DIR = Path(__file__).resolve().parent.parent
 MODEL_PATH = BASE_DIR / "models" / "emotion_model.h5"
 
@@ -48,15 +49,25 @@ def predict_emotion(file_path):
 
     top_index = int(np.argmax(prediction))
     top_confidence = float(prediction[top_index])
-    emotion = EMOTIONS[top_index]
+    raw_emotion = EMOTIONS[top_index]
+    emotion = raw_emotion
     uncertain = top_confidence < min_confidence
+
+    distress_score = 0.0
+    for idx, label in enumerate(EMOTIONS):
+        if label in NEGATIVE_EMOTIONS:
+            distress_score += float(prediction[idx])
+
+    calm_masking_risk = raw_emotion in {"calm", "neutral"} and distress_score >= 0.35
 
     if uncertain:
         emotion = "neutral"
 
     return {
         "emotion": emotion,
-        "raw_emotion": EMOTIONS[top_index],
+        "raw_emotion": raw_emotion,
         "confidence": round(top_confidence, 4),
         "uncertain": uncertain,
+        "distress_score": round(distress_score, 4),
+        "calm_masking_risk": calm_masking_risk,
     }

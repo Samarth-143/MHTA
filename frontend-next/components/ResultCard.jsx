@@ -53,7 +53,20 @@ export default function ResultCard({ result, loading }) {
           <div className="rounded-[1.75rem] border border-white/10 bg-ink-950/30 p-6">
             <p className="text-xs uppercase tracking-[0.25em] text-white/38">Emotion</p>
             <p className="mt-3 text-4xl font-semibold text-white sm:text-5xl">{result.emotion}</p>
+            <p className="mt-3 text-sm text-white/60">
+              Confidence: <span className="font-medium text-white/85">{Math.round((result.confidence || 0) * 100)}%</span>
+            </p>
+            {result.raw_emotion && result.raw_emotion !== result.emotion ? (
+              <p className="mt-1 text-xs text-amber-200/85">Raw tone prediction: {result.raw_emotion}</p>
+            ) : null}
           </div>
+
+          {result.flagged ? (
+            <div className="rounded-[1.5rem] border border-rose-300/30 bg-rose-400/12 p-4 text-rose-100">
+              <p className="text-xs uppercase tracking-[0.2em] opacity-85">Distress flag</p>
+              <p className="mt-2 text-sm leading-6">{result.flag_reason || "Potential distress detected. Please review manually."}</p>
+            </div>
+          ) : null}
 
           <div className={`flex items-start gap-4 rounded-[1.75rem] border p-5 ${trendStyles[tone]}`}>
             <div className="mt-0.5 rounded-2xl bg-white/10 p-3">

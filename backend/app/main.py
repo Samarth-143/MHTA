@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
 import shutil
 import os
@@ -10,6 +10,11 @@ from .database import DB_PATH, init_db, insert_emotion, fetch_emotions
 from .trend import analyze_trend
 
 app = FastAPI()
+
+NEGATIVE_TEXT_CUES = {
+    "suicide", "kill myself", "want to die", "hopeless", "worthless", "depressed",
+    "panic", "anxious", "can't cope", "hurt myself", "self harm", "alone", "empty",
+}
 
 
 def _build_allowed_origins():
@@ -53,8 +58,18 @@ def health_check():
     return {"status": "healthy"}
 
 
+def _analyze_text_risk(text):
+    if not text:
+        return {"score": 0.0, "matched": []}
+
+    normalized = text.lower().strip()
+    matched = [cue for cue in NEGATIVE_TEXT_CUES if cue in normalized]
+    score = min(1.0, len(matched) / 3.0)
+    return {"score": round(score, 4), "matched": matched}
+
+
 @app.post("/predict/")
-async def predict(file: UploadFile = File(...)):
+async def predict(file: UploadFile = File(...), text: str = Form(default="")):
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file received.")
 
@@ -65,7 +80,18 @@ async def predict(file: UploadFile = File(...)):
 
     try:
         prediction = predict_emotion(file_location)
+        text_risk = _analyze_text_risk(text)
+
         emotion = prediction["emotion"]
+        flagged = prediction["calm_masking_risk"] or text_risk["score"] >= 0.34
+        flag_reason = ""
+
+        if text_risk["score"] >= 0.34 and emotion in {"calm", "neutral"}:
+            emotion = "sad"
+            flag_reason = "Distressing language detected in transcript/text."
+        elif prediction["calm_masking_risk"]:
+            flag_reason = "Tone appears calm but model still shows elevated negative affect probability."
+
         insert_emotion(emotion)
 
         history = fetch_emotions()
@@ -77,6 +103,11 @@ async def predict(file: UploadFile = File(...)):
             "raw_emotion": prediction["raw_emotion"],
             "confidence": prediction["confidence"],
             "uncertain": prediction["uncertain"],
+            "distress_score": prediction["distress_score"],
+            "content_risk": text_risk["score"],
+            "content_matches": text_risk["matched"],
+            "flagged": flagged,
+            "flag_reason": flag_reason,
             "trend": trend,
             "message": f"Your recent emotional pattern suggests: {trend}",
         }

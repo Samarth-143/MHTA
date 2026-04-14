@@ -82,22 +82,6 @@ class ChatPayload(BaseModel):
     history: list[dict] = []
 
 
-def _build_gemini_contents(history, latest_message):
-    contents = []
-
-    for item in (history or [])[-12:]:
-        text = str(item.get("text", "")).strip()
-        if not text:
-            continue
-
-        role = str(item.get("role", "user")).lower()
-        gemini_role = "model" if role == "assistant" else "user"
-        contents.append({"role": gemini_role, "parts": [{"text": text}]})
-
-    contents.append({"role": "user", "parts": [{"text": latest_message.strip()}]})
-    return contents
-
-
 def _build_openai_messages(history, latest_message):
     messages = [{"role": "system", "content": SUPPORT_SYSTEM_PROMPT}]
 
@@ -112,68 +96,6 @@ def _build_openai_messages(history, latest_message):
 
     messages.append({"role": "user", "content": latest_message.strip()})
     return messages
-
-
-def _chat_with_gemini(payload: ChatPayload):
-    api_key = os.getenv("GEMINI_API_KEY", "").strip()
-    if not api_key:
-        raise RuntimeError("Gemini API key is missing on the server.")
-
-    configured_model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash-latest").strip() or "gemini-1.5-flash-latest"
-    configured_model = configured_model.removeprefix("models/")
-    model_candidates = [
-        configured_model,
-        "gemini-1.5-flash-latest",
-        "gemini-1.5-flash",
-        "gemini-2.0-flash",
-    ]
-
-    body = {
-        "system_instruction": {"parts": [{"text": SUPPORT_SYSTEM_PROMPT}]},
-        "contents": _build_gemini_contents(payload.history, payload.message),
-        "generationConfig": {
-            "temperature": 0.4,
-            "maxOutputTokens": 400,
-        },
-    }
-
-    response = None
-    payload_json = {}
-    selected_model = None
-
-    for model in dict.fromkeys(model_candidates):
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-        try:
-            response = requests.post(url, json=body, timeout=45)
-            payload_json = response.json()
-        except Exception:
-            continue
-
-        if response.status_code < 400:
-            selected_model = model
-            break
-
-        error_message = payload_json.get("error", {}).get("message", "")
-        if "not found" in error_message.lower() or "not supported" in error_message.lower():
-            continue
-
-        raise RuntimeError(error_message or "Gemini request failed")
-
-    if response is None or response.status_code >= 400:
-        detail = payload_json.get("error", {}).get("message", "Gemini request failed")
-        raise RuntimeError(detail)
-
-    candidates = payload_json.get("candidates", [])
-    if not candidates:
-        raise RuntimeError("Chat service returned no response.")
-
-    parts = candidates[0].get("content", {}).get("parts", [])
-    reply = " ".join(str(part.get("text", "")).strip() for part in parts if part.get("text", "")).strip()
-
-    if not reply:
-        raise RuntimeError("Chat service returned an empty response.")
-
-    return {"reply": reply, "provider": "gemini", "model": selected_model or configured_model}
 
 
 def _chat_with_openai(payload: ChatPayload):
@@ -219,19 +141,10 @@ def chat_support(payload: ChatPayload):
     if not payload.message.strip():
         raise HTTPException(status_code=400, detail="Message cannot be empty.")
 
-    errors = []
-
-    try:
-        return _chat_with_gemini(payload)
-    except Exception as exc:
-        errors.append(f"Gemini: {exc}")
-
     try:
         return _chat_with_openai(payload)
     except Exception as exc:
-        errors.append(f"OpenAI: {exc}")
-
-    raise HTTPException(status_code=502, detail=" | ".join(errors) if errors else "No chat provider available")
+        raise HTTPException(status_code=502, detail=f"OpenAI: {exc}") from exc
 
 
 @app.post("/predict/")

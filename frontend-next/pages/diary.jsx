@@ -89,6 +89,7 @@ export default function DiaryPage() {
             onSectionChange={(section) => {
               if (section === "analyzer") router.push("/");
               if (section === "calendar") router.push("/calendar");
+              if (section === "chat") router.push("/chat");
             }}
           />
 

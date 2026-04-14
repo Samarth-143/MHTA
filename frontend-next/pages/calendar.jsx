@@ -343,6 +343,9 @@ export default function CalendarPage() {
               if (section === "diary") {
                 router.push("/diary");
               }
+              if (section === "chat") {
+                router.push("/chat");
+              }
             }}
           />
 

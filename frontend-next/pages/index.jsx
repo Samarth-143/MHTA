@@ -397,6 +397,9 @@ export default function HomePage() {
               if (section === "calendar") {
                 router.push("/calendar");
               }
+              if (section === "chat") {
+                router.push("/chat");
+              }
             }}
           />
 

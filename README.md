@@ -19,6 +19,7 @@ A full-stack app that analyzes emotion from voice, tracks mood trends over time,
 - Lets users write daily diary entries
 - Computes diary sentiment (positive/neutral/negative)
 - Shows calendar-based day view with affirmation + diary sentiment
+- Includes a support chatbot powered by Gemini API
 - Supports user auth and per-user storage with Supabase
 
 ## Tech stack
@@ -31,13 +32,14 @@ A full-stack app that analyzes emotion from voice, tracks mood trends over time,
 ## Project structure
 
 - `backend/` - FastAPI backend code, model files, local DB, and Python requirements
-- `frontend-next/` - Next.js UI (Home, Diary, Calendar)
+- `frontend-next/` - Next.js UI (Home, Diary, Calendar, Chat)
 
 ## API endpoints
 
 - `POST /predict/` - analyze audio and return emotion + trend
 - `GET /history/` - fetch stored emotion history
 - `DELETE /clear/` - clear stored emotion history
+- `POST /chat/` - send a support chat message (Gemini-backed)
 
 ## Local setup
 
@@ -86,5 +88,7 @@ In your Hugging Face Space settings, add:
 ```env
 CORS_ORIGINS=https://your-project.vercel.app
 MODEL_URL=https://raw.githubusercontent.com/Samarth-143/MHTA/main/backend/models/emotion_model.h5
+GEMINI_API_KEY=your_gemini_api_key
+GEMINI_MODEL=gemini-1.5-flash
 ```
 

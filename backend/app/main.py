@@ -4,6 +4,8 @@ import shutil
 import os
 import sqlite3
 from pathlib import Path
+import requests
+from pydantic import BaseModel
 
 from .model import load_emotion_model, predict_emotion
 from .transcription import transcribe_audio
@@ -11,6 +13,12 @@ from .database import DB_PATH, init_db, insert_emotion, fetch_emotions
 from .trend import analyze_trend
 
 app = FastAPI()
+
+SUPPORT_SYSTEM_PROMPT = (
+    "You are a calm, supportive mental wellness assistant. "
+    "Listen empathetically, offer grounding suggestions, and avoid diagnosis. "
+    "If the user expresses self-harm intent, strongly encourage immediate professional help and local emergency support."
+)
 
 NEGATIVE_TEXT_CUES = {
     "suicide", "kill myself", "want to die", "hopeless", "worthless", "depressed",
@@ -67,6 +75,71 @@ def _analyze_text_risk(text):
     matched = [cue for cue in NEGATIVE_TEXT_CUES if cue in normalized]
     score = min(1.0, len(matched) / 3.0)
     return {"score": round(score, 4), "matched": matched}
+
+
+class ChatPayload(BaseModel):
+    message: str
+    history: list[dict] = []
+
+
+def _build_gemini_contents(history, latest_message):
+    contents = []
+
+    for item in (history or [])[-12:]:
+        text = str(item.get("text", "")).strip()
+        if not text:
+            continue
+
+        role = str(item.get("role", "user")).lower()
+        gemini_role = "model" if role == "assistant" else "user"
+        contents.append({"role": gemini_role, "parts": [{"text": text}]})
+
+    contents.append({"role": "user", "parts": [{"text": latest_message.strip()}]})
+    return contents
+
+
+@app.post("/chat/")
+def chat_support(payload: ChatPayload):
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        raise HTTPException(status_code=503, detail="Gemini API key is missing on the server.")
+
+    if not payload.message.strip():
+        raise HTTPException(status_code=400, detail="Message cannot be empty.")
+
+    model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash").strip() or "gemini-1.5-flash"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+
+    body = {
+        "system_instruction": {"parts": [{"text": SUPPORT_SYSTEM_PROMPT}]},
+        "contents": _build_gemini_contents(payload.history, payload.message),
+        "generationConfig": {
+            "temperature": 0.4,
+            "maxOutputTokens": 400,
+        },
+    }
+
+    try:
+        response = requests.post(url, json=body, timeout=45)
+        payload_json = response.json()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Chat service unavailable: {exc}") from exc
+
+    if response.status_code >= 400:
+        detail = payload_json.get("error", {}).get("message", "Gemini request failed")
+        raise HTTPException(status_code=502, detail=detail)
+
+    candidates = payload_json.get("candidates", [])
+    if not candidates:
+        raise HTTPException(status_code=502, detail="Chat service returned no response.")
+
+    parts = candidates[0].get("content", {}).get("parts", [])
+    reply = " ".join(str(part.get("text", "")).strip() for part in parts if part.get("text", "")).strip()
+
+    if not reply:
+        raise HTTPException(status_code=502, detail="Chat service returned an empty response.")
+
+    return {"reply": reply}
 
 
 @app.post("/predict/")

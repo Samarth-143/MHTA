@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { CalendarDays, ChevronLeft, ChevronRight, LineChart, NotebookPen } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, LineChart, MessageCircleHeart, NotebookPen } from "lucide-react";
 
 const ITEMS = [
   { key: "analyzer", label: "Analysis", icon: LineChart },
   { key: "diary", label: "Diary", icon: NotebookPen },
   { key: "calendar", label: "Calendar", icon: CalendarDays },
+  { key: "chat", label: "Support Chat", icon: MessageCircleHeart },
 ];
 
 export default function SidePanel({
@@ -14,6 +15,7 @@ export default function SidePanel({
   includeAnalysis = true,
   includeDiary = true,
   includeCalendar = true,
+  includeChat = true,
 }) {
   const [collapsed, setCollapsed] = useState(false);
 
@@ -21,6 +23,7 @@ export default function SidePanel({
     if (item.key === "analyzer") return includeAnalysis;
     if (item.key === "diary") return includeDiary;
     if (item.key === "calendar") return includeCalendar;
+    if (item.key === "chat") return includeChat;
     return true;
   });
 
@@ -68,11 +71,12 @@ export default function SidePanel({
           const Icon = item.icon;
           const isActive = activeSection === item.key;
 
-          if (item.key === "calendar") {
+          if (item.key === "calendar" || item.key === "chat") {
+            const href = item.key === "calendar" ? "/calendar" : "/chat";
             return (
               <Link
                 key={item.key}
-                href="/calendar"
+                href={href}
                 title={item.label}
                 className={`flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-sm font-medium transition ${
                   isActive

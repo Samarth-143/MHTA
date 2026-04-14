@@ -40,6 +40,18 @@ export async function clearHistory() {
   return parseResponse(response);
 }
 
+export async function sendSupportMessage(message, history = []) {
+  const response = await fetch(`${API_BASE_URL}/chat/`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ message, history }),
+  });
+
+  return parseResponse(response);
+}
+
 export function emotionToScore(emotion) {
   const scores = {
     happy: 2,

@@ -107,8 +107,14 @@ def chat_support(payload: ChatPayload):
     if not payload.message.strip():
         raise HTTPException(status_code=400, detail="Message cannot be empty.")
 
-    model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash").strip() or "gemini-1.5-flash"
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+    configured_model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash-latest").strip() or "gemini-1.5-flash-latest"
+    configured_model = configured_model.removeprefix("models/")
+    model_candidates = [
+        configured_model,
+        "gemini-1.5-flash-latest",
+        "gemini-1.5-flash",
+        "gemini-2.0-flash",
+    ]
 
     body = {
         "system_instruction": {"parts": [{"text": SUPPORT_SYSTEM_PROMPT}]},
@@ -119,13 +125,29 @@ def chat_support(payload: ChatPayload):
         },
     }
 
-    try:
-        response = requests.post(url, json=body, timeout=45)
-        payload_json = response.json()
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Chat service unavailable: {exc}") from exc
+    response = None
+    payload_json = {}
+    selected_model = None
 
-    if response.status_code >= 400:
+    for model in dict.fromkeys(model_candidates):
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+        try:
+            response = requests.post(url, json=body, timeout=45)
+            payload_json = response.json()
+        except Exception:
+            continue
+
+        if response.status_code < 400:
+            selected_model = model
+            break
+
+        error_message = payload_json.get("error", {}).get("message", "")
+        if "not found" in error_message.lower() or "not supported" in error_message.lower():
+            continue
+
+        raise HTTPException(status_code=502, detail=error_message or "Gemini request failed")
+
+    if response is None or response.status_code >= 400:
         detail = payload_json.get("error", {}).get("message", "Gemini request failed")
         raise HTTPException(status_code=502, detail=detail)
 
@@ -139,7 +161,7 @@ def chat_support(payload: ChatPayload):
     if not reply:
         raise HTTPException(status_code=502, detail="Chat service returned an empty response.")
 
-    return {"reply": reply}
+    return {"reply": reply, "model": selected_model or configured_model}
 
 
 @app.post("/predict/")

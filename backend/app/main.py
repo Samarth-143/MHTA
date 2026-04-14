@@ -98,14 +98,26 @@ def _build_gemini_contents(history, latest_message):
     return contents
 
 
-@app.post("/chat/")
-def chat_support(payload: ChatPayload):
+def _build_openai_messages(history, latest_message):
+    messages = [{"role": "system", "content": SUPPORT_SYSTEM_PROMPT}]
+
+    for item in (history or [])[-12:]:
+        text = str(item.get("text", "")).strip()
+        if not text:
+            continue
+
+        role = str(item.get("role", "user")).lower()
+        openai_role = "assistant" if role == "assistant" else "user"
+        messages.append({"role": openai_role, "content": text})
+
+    messages.append({"role": "user", "content": latest_message.strip()})
+    return messages
+
+
+def _chat_with_gemini(payload: ChatPayload):
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
     if not api_key:
-        raise HTTPException(status_code=503, detail="Gemini API key is missing on the server.")
-
-    if not payload.message.strip():
-        raise HTTPException(status_code=400, detail="Message cannot be empty.")
+        raise RuntimeError("Gemini API key is missing on the server.")
 
     configured_model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash-latest").strip() or "gemini-1.5-flash-latest"
     configured_model = configured_model.removeprefix("models/")
@@ -145,23 +157,81 @@ def chat_support(payload: ChatPayload):
         if "not found" in error_message.lower() or "not supported" in error_message.lower():
             continue
 
-        raise HTTPException(status_code=502, detail=error_message or "Gemini request failed")
+        raise RuntimeError(error_message or "Gemini request failed")
 
     if response is None or response.status_code >= 400:
         detail = payload_json.get("error", {}).get("message", "Gemini request failed")
-        raise HTTPException(status_code=502, detail=detail)
+        raise RuntimeError(detail)
 
     candidates = payload_json.get("candidates", [])
     if not candidates:
-        raise HTTPException(status_code=502, detail="Chat service returned no response.")
+        raise RuntimeError("Chat service returned no response.")
 
     parts = candidates[0].get("content", {}).get("parts", [])
     reply = " ".join(str(part.get("text", "")).strip() for part in parts if part.get("text", "")).strip()
 
     if not reply:
-        raise HTTPException(status_code=502, detail="Chat service returned an empty response.")
+        raise RuntimeError("Chat service returned an empty response.")
 
-    return {"reply": reply, "model": selected_model or configured_model}
+    return {"reply": reply, "provider": "gemini", "model": selected_model or configured_model}
+
+
+def _chat_with_openai(payload: ChatPayload):
+    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("OpenAI API key is missing on the server.")
+
+    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
+    body = {
+        "model": model,
+        "messages": _build_openai_messages(payload.history, payload.message),
+        "temperature": 0.4,
+        "max_tokens": 400,
+    }
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=body, timeout=45)
+        payload_json = response.json()
+    except Exception as exc:
+        raise RuntimeError(f"OpenAI request failed: {exc}") from exc
+
+    if response.status_code >= 400:
+        detail = payload_json.get("error", {}).get("message", "OpenAI request failed")
+        raise RuntimeError(detail)
+
+    choices = payload_json.get("choices", [])
+    if not choices:
+        raise RuntimeError("OpenAI returned no response.")
+
+    reply = str(choices[0].get("message", {}).get("content", "")).strip()
+    if not reply:
+        raise RuntimeError("OpenAI returned an empty response.")
+
+    return {"reply": reply, "provider": "openai", "model": model}
+
+
+@app.post("/chat/")
+def chat_support(payload: ChatPayload):
+    if not payload.message.strip():
+        raise HTTPException(status_code=400, detail="Message cannot be empty.")
+
+    errors = []
+
+    try:
+        return _chat_with_gemini(payload)
+    except Exception as exc:
+        errors.append(f"Gemini: {exc}")
+
+    try:
+        return _chat_with_openai(payload)
+    except Exception as exc:
+        errors.append(f"OpenAI: {exc}")
+
+    raise HTTPException(status_code=502, detail=" | ".join(errors) if errors else "No chat provider available")
 
 
 @app.post("/predict/")

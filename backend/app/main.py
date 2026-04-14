@@ -70,7 +70,7 @@ def _analyze_text_risk(text):
 
 
 @app.post("/predict/")
-async def predict(file: UploadFile = File(...), language: str = Form(default="en")):
+async def predict(file: UploadFile = File(...), language: str = Form(default="auto")):
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file received.")
 

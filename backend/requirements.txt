@@ -6,5 +6,4 @@ fastapi
 uvicorn
 requests
 python-multipart
-vosk
 faster-whisper

@@ -81,14 +81,19 @@ async def predict(file: UploadFile = File(...), language: str = Form(default="en
 
     try:
         prediction = predict_emotion(file_location)
-        transcript_source = "auto"
         transcript = ""
+        transcript_source = "unavailable"
+        transcript_status = "unavailable"
 
         try:
-            transcript = transcribe_audio(file_location, language=language)
+            stt_result = transcribe_audio(file_location, language=language)
+            transcript = stt_result.get("text", "")
+            transcript_status = stt_result.get("status", "unavailable")
+            transcript_source = stt_result.get("source", "unavailable")
         except Exception:
             transcript = ""
             transcript_source = "unavailable"
+            transcript_status = "error"
 
         text_risk = _analyze_text_risk(transcript)
 
@@ -119,6 +124,7 @@ async def predict(file: UploadFile = File(...), language: str = Form(default="en
             "transcript": transcript,
             "transcript_source": transcript_source,
             "transcript_language": language,
+            "transcript_status": transcript_status,
             "flagged": flagged,
             "flag_reason": flag_reason,
             "trend": trend,

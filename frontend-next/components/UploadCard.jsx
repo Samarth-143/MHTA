@@ -13,8 +13,6 @@ export default function UploadCard({
   onFileChange,
   onRemoveFile,
   onAnalyze,
-  transcriptHint,
-  onTranscriptHintChange,
 }) {
   const inputRef = useRef(null);
   const mediaRecorderRef = useRef(null);
@@ -142,16 +140,6 @@ export default function UploadCard({
             : "border-white/12 bg-ink-950/35 hover:border-cyan-300/30 hover:bg-white/7"
         }`}
       >
-        <div className="mb-4 rounded-2xl border border-white/10 bg-white/5 p-3">
-          <label className="mb-2 block text-xs uppercase tracking-[0.2em] text-white/45">What was said? (optional)</label>
-          <textarea
-            value={transcriptHint}
-            onChange={(event) => onTranscriptHintChange?.(event.target.value)}
-            placeholder="Add a short transcript or key phrase to improve distress detection when tone sounds calm."
-            className="min-h-20 w-full resize-y rounded-xl border border-white/10 bg-ink-950/35 px-3 py-2 text-sm text-white outline-none placeholder:text-white/35 focus:border-cyan-300/45"
-          />
-        </div>
-
         <input
           ref={inputRef}
           type="file"

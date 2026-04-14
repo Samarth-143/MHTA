@@ -61,6 +61,14 @@ export default function ResultCard({ result, loading }) {
             ) : null}
           </div>
 
+          {result.transcript ? (
+            <div className="rounded-[1.5rem] border border-white/10 bg-ink-950/30 p-5 text-white/80">
+              <p className="text-xs uppercase tracking-[0.2em] text-white/38">Auto transcript</p>
+              <p className="mt-2 text-sm leading-6">{result.transcript}</p>
+              <p className="mt-2 text-xs text-white/45">Source: {result.transcript_source || "auto"}</p>
+            </div>
+          ) : null}
+
           {result.flagged ? (
             <div className="rounded-[1.5rem] border border-rose-300/30 bg-rose-400/12 p-4 text-rose-100">
               <p className="text-xs uppercase tracking-[0.2em] opacity-85">Distress flag</p>

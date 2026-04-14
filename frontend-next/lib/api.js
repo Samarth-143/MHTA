@@ -12,10 +12,9 @@ async function parseResponse(response) {
   return payload;
 }
 
-export async function predictEmotion(file, text = "") {
+export async function predictEmotion(file) {
   const formData = new FormData();
   formData.append("file", file);
-  formData.append("text", text || "");
 
   const response = await fetch(`${API_BASE_URL}/predict/`, {
     method: "POST",

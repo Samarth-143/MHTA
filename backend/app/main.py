@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, Form
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import shutil
 import os
@@ -6,6 +6,7 @@ import sqlite3
 from pathlib import Path
 
 from .model import load_emotion_model, predict_emotion
+from .transcription import transcribe_audio
 from .database import DB_PATH, init_db, insert_emotion, fetch_emotions
 from .trend import analyze_trend
 
@@ -69,7 +70,7 @@ def _analyze_text_risk(text):
 
 
 @app.post("/predict/")
-async def predict(file: UploadFile = File(...), text: str = Form(default="")):
+async def predict(file: UploadFile = File(...)):
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file received.")
 
@@ -80,7 +81,16 @@ async def predict(file: UploadFile = File(...), text: str = Form(default="")):
 
     try:
         prediction = predict_emotion(file_location)
-        text_risk = _analyze_text_risk(text)
+        transcript_source = "auto"
+        transcript = ""
+
+        try:
+            transcript = transcribe_audio(file_location)
+        except Exception:
+            transcript = ""
+            transcript_source = "unavailable"
+
+        text_risk = _analyze_text_risk(transcript)
 
         emotion = prediction["emotion"]
         flagged = prediction["calm_masking_risk"] or text_risk["score"] >= 0.34
@@ -106,6 +116,8 @@ async def predict(file: UploadFile = File(...), text: str = Form(default="")):
             "distress_score": prediction["distress_score"],
             "content_risk": text_risk["score"],
             "content_matches": text_risk["matched"],
+            "transcript": transcript,
+            "transcript_source": transcript_source,
             "flagged": flagged,
             "flag_reason": flag_reason,
             "trend": trend,

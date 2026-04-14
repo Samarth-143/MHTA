@@ -179,7 +179,6 @@ export default function HomePage() {
   const [authReady, setAuthReady] = useState(false);
   const [user, setUser] = useState(null);
   const [selectedFile, setSelectedFile] = useState(null);
-  const [transcriptHint, setTranscriptHint] = useState("");
   const [previewUrl, setPreviewUrl] = useState("");
   const [result, setResult] = useState(null);
   const [history, setHistory] = useState([]);
@@ -303,7 +302,6 @@ export default function HomePage() {
 
     setSelectedFile(null);
     setPreviewUrl("");
-    setTranscriptHint("");
   }
 
   async function handleAnalyze() {
@@ -315,7 +313,7 @@ export default function HomePage() {
     setIsAnalyzing(true);
 
     try {
-      const response = await predictEmotion(selectedFile, transcriptHint);
+      const response = await predictEmotion(selectedFile);
       setResult(response);
 
       try {
@@ -428,8 +426,6 @@ export default function HomePage() {
                   onFileChange={handleFileChange}
                   onRemoveFile={handleRemoveFile}
                   onAnalyze={handleAnalyze}
-                  transcriptHint={transcriptHint}
-                  onTranscriptHintChange={setTranscriptHint}
                 />
 
                 <ResultCard result={result} loading={isAnalyzing} />

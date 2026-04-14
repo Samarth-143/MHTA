@@ -7,8 +7,14 @@ ENV PYTHONUNBUFFERED=1
 ENV PORT=7860
 
 RUN apt-get update \
-	&& apt-get install -y --no-install-recommends ffmpeg \
+	&& apt-get install -y --no-install-recommends ffmpeg wget unzip \
 	&& rm -rf /var/lib/apt/lists/*
+
+ENV VOSK_MODEL_PATH=/opt/vosk-model-small-en-us-0.15
+
+RUN wget -q https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip -O /tmp/vosk-model.zip \
+	&& unzip -q /tmp/vosk-model.zip -d /opt \
+	&& rm -f /tmp/vosk-model.zip
 
 COPY backend/requirements.txt ./backend/requirements.txt
 RUN pip install --no-cache-dir -r backend/requirements.txt

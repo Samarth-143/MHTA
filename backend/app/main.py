@@ -128,13 +128,28 @@ def _decode_nvidia_payload(response):
     return None
 
 
+def _resolve_nvidia_chat_url(base_url):
+    cleaned = (base_url or "").strip().rstrip("/")
+    if not cleaned:
+        cleaned = "https://integrate.api.nvidia.com"
+
+    if cleaned.endswith("/chat/completions"):
+        return cleaned
+
+    if cleaned.endswith("/v1"):
+        return f"{cleaned}/chat/completions"
+
+    return f"{cleaned}/v1/chat/completions"
+
+
 def _chat_with_nvidia(payload: ChatPayload):
     api_key = os.getenv("NVIDIA_API_KEY", "").strip()
     if not api_key:
         raise RuntimeError("NVIDIA API key is missing on the server.")
 
     model = os.getenv("NVIDIA_MODEL", "glm-4.7").strip() or "glm-4.7"
-    base_url = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").strip().rstrip("/")
+    base_url = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com").strip().rstrip("/")
+    chat_url = _resolve_nvidia_chat_url(base_url)
     body = {
         "model": model,
         "messages": _build_openai_messages(payload.history, payload.message),
@@ -149,7 +164,7 @@ def _chat_with_nvidia(payload: ChatPayload):
     }
 
     try:
-        response = requests.post(f"{base_url}/chat/completions", headers=headers, json=body, timeout=45)
+        response = requests.post(chat_url, headers=headers, json=body, timeout=45)
     except Exception as exc:
         raise RuntimeError(f"NVIDIA request failed: {exc}") from exc
 
@@ -160,7 +175,7 @@ def _chat_with_nvidia(payload: ChatPayload):
             detail = payload_json.get("error", {}).get("message", "NVIDIA request failed")
         else:
             detail = (response.text or "NVIDIA request failed")[:300]
-        raise RuntimeError(detail)
+        raise RuntimeError(f"{detail} (url: {chat_url})")
 
     if not isinstance(payload_json, dict):
         preview = (response.text or "")[:300]

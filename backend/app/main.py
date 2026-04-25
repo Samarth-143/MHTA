@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import shutil
 import os
 import sqlite3
+import json
 from pathlib import Path
 import requests
 from pydantic import BaseModel
@@ -98,6 +99,35 @@ def _build_openai_messages(history, latest_message):
     return messages
 
 
+def _decode_nvidia_payload(response):
+    raw_text = response.text or ""
+
+    try:
+        return response.json()
+    except Exception:
+        pass
+
+    # Some gateways can return SSE-style chunks even when we expect JSON.
+    for line in raw_text.splitlines():
+        line = line.strip()
+        if not line.startswith("data:"):
+            continue
+
+        chunk = line[5:].strip()
+        if not chunk or chunk == "[DONE]":
+            continue
+
+        try:
+            parsed = json.loads(chunk)
+        except Exception:
+            continue
+
+        if isinstance(parsed, dict) and ("choices" in parsed or "error" in parsed):
+            return parsed
+
+    return None
+
+
 def _chat_with_nvidia(payload: ChatPayload):
     api_key = os.getenv("NVIDIA_API_KEY", "").strip()
     if not api_key:
@@ -110,21 +140,31 @@ def _chat_with_nvidia(payload: ChatPayload):
         "messages": _build_openai_messages(payload.history, payload.message),
         "temperature": 0.4,
         "max_tokens": 400,
+        "stream": False,
     }
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
+        "Accept": "application/json",
     }
 
     try:
         response = requests.post(f"{base_url}/chat/completions", headers=headers, json=body, timeout=45)
-        payload_json = response.json()
     except Exception as exc:
         raise RuntimeError(f"NVIDIA request failed: {exc}") from exc
 
+    payload_json = _decode_nvidia_payload(response)
+
     if response.status_code >= 400:
-        detail = payload_json.get("error", {}).get("message", "NVIDIA request failed")
+        if isinstance(payload_json, dict):
+            detail = payload_json.get("error", {}).get("message", "NVIDIA request failed")
+        else:
+            detail = (response.text or "NVIDIA request failed")[:300]
         raise RuntimeError(detail)
+
+    if not isinstance(payload_json, dict):
+        preview = (response.text or "")[:300]
+        raise RuntimeError(f"NVIDIA returned non-JSON response: {preview}")
 
     choices = payload_json.get("choices", [])
     if not choices:

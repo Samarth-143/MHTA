@@ -5,5 +5,6 @@ streamlit
 fastapi
 uvicorn
 requests
+openai
 python-multipart
 faster-whisper

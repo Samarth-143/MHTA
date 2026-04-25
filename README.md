@@ -89,7 +89,9 @@ In your Hugging Face Space settings, add:
 CORS_ORIGINS=https://your-project.vercel.app
 MODEL_URL=https://raw.githubusercontent.com/Samarth-143/MHTA/main/backend/models/emotion_model.h5
 NVIDIA_API_KEY=your_nvidia_api_key
-NVIDIA_MODEL=glm-4.7
-NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
+NVIDIA_MODEL=z-ai/glm4.7
 ```
+
+Use `NVIDIA_API_KEY` under Secrets, and keep `NVIDIA_MODEL`, `CORS_ORIGINS`, and `MODEL_URL` under Variables.
+Do not create the same name in both Variables and Secrets, or Hugging Face will raise a collision error.
 

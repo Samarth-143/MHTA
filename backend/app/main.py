@@ -3,10 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 import shutil
 import os
 import sqlite3
-import json
 from pathlib import Path
-import requests
 from pydantic import BaseModel
+from openai import OpenAI
 
 from .model import load_emotion_model, predict_emotion
 from .transcription import transcribe_audio
@@ -99,47 +98,18 @@ def _build_openai_messages(history, latest_message):
     return messages
 
 
-def _decode_nvidia_payload(response):
-    raw_text = response.text or ""
-
-    try:
-        return response.json()
-    except Exception:
-        pass
-
-    # Some gateways can return SSE-style chunks even when we expect JSON.
-    for line in raw_text.splitlines():
-        line = line.strip()
-        if not line.startswith("data:"):
-            continue
-
-        chunk = line[5:].strip()
-        if not chunk or chunk == "[DONE]":
-            continue
-
-        try:
-            parsed = json.loads(chunk)
-        except Exception:
-            continue
-
-        if isinstance(parsed, dict) and ("choices" in parsed or "error" in parsed):
-            return parsed
-
-    return None
-
-
-def _resolve_nvidia_chat_url(base_url):
+def _resolve_nvidia_base_url(base_url):
     cleaned = (base_url or "").strip().rstrip("/")
     if not cleaned:
         cleaned = "https://integrate.api.nvidia.com"
 
     if cleaned.endswith("/chat/completions"):
-        return cleaned
+        cleaned = cleaned[: -len("/chat/completions")]
 
-    if cleaned.endswith("/v1"):
-        return f"{cleaned}/chat/completions"
+    if not cleaned.endswith("/v1"):
+        cleaned = f"{cleaned}/v1"
 
-    return f"{cleaned}/v1/chat/completions"
+    return cleaned
 
 
 def _chat_with_nvidia(payload: ChatPayload):
@@ -147,45 +117,40 @@ def _chat_with_nvidia(payload: ChatPayload):
     if not api_key:
         raise RuntimeError("NVIDIA API key is missing on the server.")
 
-    model = os.getenv("NVIDIA_MODEL", "glm-4.7").strip() or "glm-4.7"
+    model = os.getenv("NVIDIA_MODEL", "z-ai/glm4.7").strip() or "z-ai/glm4.7"
     base_url = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com").strip().rstrip("/")
-    chat_url = _resolve_nvidia_chat_url(base_url)
-    body = {
-        "model": model,
-        "messages": _build_openai_messages(payload.history, payload.message),
-        "temperature": 0.4,
-        "max_tokens": 400,
-        "stream": False,
-    }
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-    }
+    resolved_base_url = _resolve_nvidia_base_url(base_url)
+    client = OpenAI(base_url=resolved_base_url, api_key=api_key)
 
     try:
-        response = requests.post(chat_url, headers=headers, json=body, timeout=45)
+        response = client.chat.completions.create(
+            model=model,
+            messages=_build_openai_messages(payload.history, payload.message),
+            temperature=0.4,
+            max_tokens=400,
+            stream=False,
+            extra_body={"chat_template_kwargs": {"enable_thinking": True, "clear_thinking": False}},
+        )
     except Exception as exc:
-        raise RuntimeError(f"NVIDIA request failed: {exc}") from exc
+        raise RuntimeError(f"NVIDIA request failed: {exc} (base_url: {resolved_base_url})") from exc
 
-    payload_json = _decode_nvidia_payload(response)
-
-    if response.status_code >= 400:
-        if isinstance(payload_json, dict):
-            detail = payload_json.get("error", {}).get("message", "NVIDIA request failed")
-        else:
-            detail = (response.text or "NVIDIA request failed")[:300]
-        raise RuntimeError(f"{detail} (url: {chat_url})")
-
-    if not isinstance(payload_json, dict):
-        preview = (response.text or "")[:300]
-        raise RuntimeError(f"NVIDIA returned non-JSON response: {preview}")
-
-    choices = payload_json.get("choices", [])
+    choices = getattr(response, "choices", []) or []
     if not choices:
         raise RuntimeError("NVIDIA returned no response.")
 
-    reply = str(choices[0].get("message", {}).get("content", "")).strip()
+    message = getattr(choices[0], "message", None)
+    raw_content = getattr(message, "content", "") if message else ""
+    if isinstance(raw_content, list):
+        parts = []
+        for item in raw_content:
+            if isinstance(item, dict):
+                parts.append(str(item.get("text", "")))
+            else:
+                parts.append(str(getattr(item, "text", "")))
+        reply = "".join(parts).strip()
+    else:
+        reply = str(raw_content or "").strip()
+
     if not reply:
         raise RuntimeError("NVIDIA returned an empty response.")
 

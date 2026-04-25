@@ -93,7 +93,9 @@ NVIDIA_MODEL=z-ai/glm4.7
 # Optional tuning for latency/reliability
 NVIDIA_ENABLE_THINKING=false
 NVIDIA_TIMEOUT_SECONDS=25
+NVIDIA_TIMEOUT_RETRY_SECONDS=45
 NVIDIA_MAX_TOKENS=300
+NVIDIA_RETRY_MAX_TOKENS=180
 # Comma-separated fallback models (optional)
 # NVIDIA_FALLBACK_MODELS=meta/llama-3.1-8b-instruct
 ```

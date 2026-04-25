@@ -174,38 +174,51 @@ def _chat_with_nvidia(payload: ChatPayload):
     base_url = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com").strip().rstrip("/")
     resolved_base_url = _resolve_nvidia_base_url(base_url)
     timeout_seconds = float(os.getenv("NVIDIA_TIMEOUT_SECONDS", "25"))
+    retry_timeout_seconds = float(os.getenv("NVIDIA_TIMEOUT_RETRY_SECONDS", str(max(timeout_seconds + 20, 45))))
     max_tokens = int(os.getenv("NVIDIA_MAX_TOKENS", "300"))
+    retry_max_tokens = int(os.getenv("NVIDIA_RETRY_MAX_TOKENS", str(min(max_tokens, 180))))
     enable_thinking = _parse_bool_env("NVIDIA_ENABLE_THINKING", default=False)
-    client = OpenAI(base_url=resolved_base_url, api_key=api_key, timeout=timeout_seconds, max_retries=1)
+    base_messages = _build_openai_messages(payload.history, payload.message)
 
     last_error = None
     for candidate_model in model_candidates:
-        request_body = {
+        request_template = {
             "model": candidate_model,
-            "messages": _build_openai_messages(payload.history, payload.message),
+            "messages": base_messages,
             "temperature": 0.4,
-            "max_tokens": max_tokens,
             "stream": False,
         }
         if enable_thinking:
-            request_body["extra_body"] = {"chat_template_kwargs": {"enable_thinking": True, "clear_thinking": False}}
+            request_template["extra_body"] = {"chat_template_kwargs": {"enable_thinking": True, "clear_thinking": False}}
 
-        try:
-            response = client.chat.completions.create(**request_body)
-            choices = getattr(response, "choices", []) or []
-            if not choices:
-                last_error = f"{candidate_model}: NVIDIA returned no response."
-                continue
+        attempt_configs = [
+            {"timeout": timeout_seconds, "max_tokens": max_tokens, "temperature": 0.4},
+            {"timeout": retry_timeout_seconds, "max_tokens": retry_max_tokens, "temperature": 0.3},
+        ]
 
-            message = getattr(choices[0], "message", None)
-            reply = _extract_reply_text(message)
-            if not reply:
-                last_error = f"{candidate_model}: NVIDIA returned an empty response."
-                continue
+        for idx, cfg in enumerate(attempt_configs, start=1):
+            request_body = dict(request_template)
+            request_body["max_tokens"] = cfg["max_tokens"]
+            request_body["temperature"] = cfg["temperature"]
 
-            return {"reply": reply, "provider": "nvidia", "model": candidate_model}
-        except Exception as exc:
-            last_error = f"{candidate_model}: {exc}"
+            client = OpenAI(base_url=resolved_base_url, api_key=api_key, timeout=cfg["timeout"], max_retries=1)
+
+            try:
+                response = client.chat.completions.create(**request_body)
+                choices = getattr(response, "choices", []) or []
+                if not choices:
+                    last_error = f"{candidate_model} attempt {idx}: NVIDIA returned no response."
+                    continue
+
+                message = getattr(choices[0], "message", None)
+                reply = _extract_reply_text(message)
+                if not reply:
+                    last_error = f"{candidate_model} attempt {idx}: NVIDIA returned an empty response."
+                    continue
+
+                return {"reply": reply, "provider": "nvidia", "model": candidate_model}
+            except Exception as exc:
+                last_error = f"{candidate_model} attempt {idx}: {exc}"
 
     raise RuntimeError(f"NVIDIA request failed: {last_error} (base_url: {resolved_base_url})")
 

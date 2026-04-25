@@ -152,7 +152,8 @@ def _extract_reply_text(message):
 
 def _resolve_model_candidates(primary_model):
     extras = os.getenv("NVIDIA_FALLBACK_MODELS", "").strip()
-    candidates = [primary_model]
+    # Include a lightweight default fallback for better uptime when primary model is unavailable.
+    candidates = [primary_model, "meta/llama-3.1-8b-instruct"]
 
     if extras:
         candidates.extend(m.strip() for m in extras.split(",") if m.strip())
@@ -162,6 +163,27 @@ def _resolve_model_candidates(primary_model):
         if model not in unique:
             unique.append(model)
     return unique
+
+
+def _is_gateway_error(exc):
+    msg = str(exc).lower()
+    return "502" in msg or "bad gateway" in msg or "gateway" in msg
+
+
+def _build_local_support_reply(user_message):
+    text = (user_message or "").lower()
+    high_risk = any(cue in text for cue in NEGATIVE_TEXT_CUES)
+    if high_risk:
+        return (
+            "I hear that you are going through a lot right now. You deserve immediate support. "
+            "If you might hurt yourself, please contact local emergency services or a crisis helpline right away. "
+            "If you can, reach out to a trusted person and stay with someone until support is available."
+        )
+
+    return (
+        "I am here with you. I may be having a temporary connection issue, but you are not alone. "
+        "Tell me one thing that feels hardest right now, and we can break it into a small next step together."
+    )
 
 
 def _chat_with_nvidia(payload: ChatPayload):
@@ -219,6 +241,9 @@ def _chat_with_nvidia(payload: ChatPayload):
                 return {"reply": reply, "provider": "nvidia", "model": candidate_model}
             except Exception as exc:
                 last_error = f"{candidate_model} attempt {idx}: {exc}"
+                # Gateway failures are usually transient service-side errors; move to next model quickly.
+                if _is_gateway_error(exc):
+                    break
 
     raise RuntimeError(f"NVIDIA request failed: {last_error} (base_url: {resolved_base_url})")
 
@@ -231,6 +256,13 @@ def chat_support(payload: ChatPayload):
     try:
         return _chat_with_nvidia(payload)
     except Exception as exc:
+        if _parse_bool_env("CHAT_LOCAL_FALLBACK", default=True):
+            return {
+                "reply": _build_local_support_reply(payload.message),
+                "provider": "local-fallback",
+                "model": "support-template",
+                "upstream_error": f"NVIDIA: {exc}",
+            }
         raise HTTPException(status_code=502, detail=f"NVIDIA: {exc}") from exc
 
 

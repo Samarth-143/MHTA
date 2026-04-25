@@ -112,49 +112,102 @@ def _resolve_nvidia_base_url(base_url):
     return cleaned
 
 
+def _parse_bool_env(name, default=False):
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _extract_reply_text(message):
+    if not message:
+        return ""
+
+    raw_content = getattr(message, "content", "")
+    if isinstance(raw_content, str):
+        text = raw_content.strip()
+        if text:
+            return text
+
+    if isinstance(raw_content, list):
+        parts = []
+        for item in raw_content:
+            if isinstance(item, dict):
+                item_text = item.get("text") or item.get("content") or ""
+                if isinstance(item_text, list):
+                    item_text = "".join(str(x) for x in item_text)
+                parts.append(str(item_text))
+            else:
+                item_text = getattr(item, "text", None)
+                if item_text is None:
+                    item_text = getattr(item, "content", "")
+                parts.append(str(item_text or ""))
+        text = "".join(parts).strip()
+        if text:
+            return text
+
+    reasoning = getattr(message, "reasoning_content", "")
+    return str(reasoning or "").strip()
+
+
+def _resolve_model_candidates(primary_model):
+    extras = os.getenv("NVIDIA_FALLBACK_MODELS", "").strip()
+    candidates = [primary_model]
+
+    if extras:
+        candidates.extend(m.strip() for m in extras.split(",") if m.strip())
+
+    unique = []
+    for model in candidates:
+        if model not in unique:
+            unique.append(model)
+    return unique
+
+
 def _chat_with_nvidia(payload: ChatPayload):
     api_key = os.getenv("NVIDIA_API_KEY", "").strip()
     if not api_key:
         raise RuntimeError("NVIDIA API key is missing on the server.")
 
     model = os.getenv("NVIDIA_MODEL", "z-ai/glm4.7").strip() or "z-ai/glm4.7"
+    model_candidates = _resolve_model_candidates(model)
     base_url = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com").strip().rstrip("/")
     resolved_base_url = _resolve_nvidia_base_url(base_url)
-    client = OpenAI(base_url=resolved_base_url, api_key=api_key)
+    timeout_seconds = float(os.getenv("NVIDIA_TIMEOUT_SECONDS", "25"))
+    max_tokens = int(os.getenv("NVIDIA_MAX_TOKENS", "300"))
+    enable_thinking = _parse_bool_env("NVIDIA_ENABLE_THINKING", default=False)
+    client = OpenAI(base_url=resolved_base_url, api_key=api_key, timeout=timeout_seconds, max_retries=1)
 
-    try:
-        response = client.chat.completions.create(
-            model=model,
-            messages=_build_openai_messages(payload.history, payload.message),
-            temperature=0.4,
-            max_tokens=400,
-            stream=False,
-            extra_body={"chat_template_kwargs": {"enable_thinking": True, "clear_thinking": False}},
-        )
-    except Exception as exc:
-        raise RuntimeError(f"NVIDIA request failed: {exc} (base_url: {resolved_base_url})") from exc
+    last_error = None
+    for candidate_model in model_candidates:
+        request_body = {
+            "model": candidate_model,
+            "messages": _build_openai_messages(payload.history, payload.message),
+            "temperature": 0.4,
+            "max_tokens": max_tokens,
+            "stream": False,
+        }
+        if enable_thinking:
+            request_body["extra_body"] = {"chat_template_kwargs": {"enable_thinking": True, "clear_thinking": False}}
 
-    choices = getattr(response, "choices", []) or []
-    if not choices:
-        raise RuntimeError("NVIDIA returned no response.")
+        try:
+            response = client.chat.completions.create(**request_body)
+            choices = getattr(response, "choices", []) or []
+            if not choices:
+                last_error = f"{candidate_model}: NVIDIA returned no response."
+                continue
 
-    message = getattr(choices[0], "message", None)
-    raw_content = getattr(message, "content", "") if message else ""
-    if isinstance(raw_content, list):
-        parts = []
-        for item in raw_content:
-            if isinstance(item, dict):
-                parts.append(str(item.get("text", "")))
-            else:
-                parts.append(str(getattr(item, "text", "")))
-        reply = "".join(parts).strip()
-    else:
-        reply = str(raw_content or "").strip()
+            message = getattr(choices[0], "message", None)
+            reply = _extract_reply_text(message)
+            if not reply:
+                last_error = f"{candidate_model}: NVIDIA returned an empty response."
+                continue
 
-    if not reply:
-        raise RuntimeError("NVIDIA returned an empty response.")
+            return {"reply": reply, "provider": "nvidia", "model": candidate_model}
+        except Exception as exc:
+            last_error = f"{candidate_model}: {exc}"
 
-    return {"reply": reply, "provider": "nvidia", "model": model}
+    raise RuntimeError(f"NVIDIA request failed: {last_error} (base_url: {resolved_base_url})")
 
 
 @app.post("/chat/")

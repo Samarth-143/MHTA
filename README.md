@@ -90,6 +90,12 @@ CORS_ORIGINS=https://your-project.vercel.app
 MODEL_URL=https://raw.githubusercontent.com/Samarth-143/MHTA/main/backend/models/emotion_model.h5
 NVIDIA_API_KEY=your_nvidia_api_key
 NVIDIA_MODEL=z-ai/glm4.7
+# Optional tuning for latency/reliability
+NVIDIA_ENABLE_THINKING=false
+NVIDIA_TIMEOUT_SECONDS=25
+NVIDIA_MAX_TOKENS=300
+# Comma-separated fallback models (optional)
+# NVIDIA_FALLBACK_MODELS=meta/llama-3.1-8b-instruct
 ```
 
 Use `NVIDIA_API_KEY` under Secrets, and keep `NVIDIA_MODEL`, `CORS_ORIGINS`, and `MODEL_URL` under Variables.

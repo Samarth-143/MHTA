@@ -19,7 +19,7 @@ A full-stack app that analyzes emotion from voice, tracks mood trends over time,
 - Lets users write daily diary entries
 - Computes diary sentiment (positive/neutral/negative)
 - Shows calendar-based day view with affirmation + diary sentiment
-- Includes a support chatbot powered by OpenAI API
+- Includes a support chatbot powered by NVIDIA API (GLM 4.7)
 - Supports user auth and per-user storage with Supabase
 
 ## Tech stack
@@ -39,7 +39,7 @@ A full-stack app that analyzes emotion from voice, tracks mood trends over time,
 - `POST /predict/` - analyze audio and return emotion + trend
 - `GET /history/` - fetch stored emotion history
 - `DELETE /clear/` - clear stored emotion history
-- `POST /chat/` - send a support chat message (OpenAI-backed)
+- `POST /chat/` - send a support chat message (NVIDIA-backed)
 
 ## Local setup
 
@@ -88,7 +88,8 @@ In your Hugging Face Space settings, add:
 ```env
 CORS_ORIGINS=https://your-project.vercel.app
 MODEL_URL=https://raw.githubusercontent.com/Samarth-143/MHTA/main/backend/models/emotion_model.h5
-OPENAI_API_KEY=your_openai_api_key
-OPENAI_MODEL=gpt-4o-mini
+NVIDIA_API_KEY=your_nvidia_api_key
+NVIDIA_MODEL=glm-4.7
+NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
 ```
 

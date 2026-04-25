@@ -98,12 +98,13 @@ def _build_openai_messages(history, latest_message):
     return messages
 
 
-def _chat_with_openai(payload: ChatPayload):
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+def _chat_with_nvidia(payload: ChatPayload):
+    api_key = os.getenv("NVIDIA_API_KEY", "").strip()
     if not api_key:
-        raise RuntimeError("OpenAI API key is missing on the server.")
+        raise RuntimeError("NVIDIA API key is missing on the server.")
 
-    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
+    model = os.getenv("NVIDIA_MODEL", "glm-4.7").strip() or "glm-4.7"
+    base_url = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").strip().rstrip("/")
     body = {
         "model": model,
         "messages": _build_openai_messages(payload.history, payload.message),
@@ -116,24 +117,24 @@ def _chat_with_openai(payload: ChatPayload):
     }
 
     try:
-        response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=body, timeout=45)
+        response = requests.post(f"{base_url}/chat/completions", headers=headers, json=body, timeout=45)
         payload_json = response.json()
     except Exception as exc:
-        raise RuntimeError(f"OpenAI request failed: {exc}") from exc
+        raise RuntimeError(f"NVIDIA request failed: {exc}") from exc
 
     if response.status_code >= 400:
-        detail = payload_json.get("error", {}).get("message", "OpenAI request failed")
+        detail = payload_json.get("error", {}).get("message", "NVIDIA request failed")
         raise RuntimeError(detail)
 
     choices = payload_json.get("choices", [])
     if not choices:
-        raise RuntimeError("OpenAI returned no response.")
+        raise RuntimeError("NVIDIA returned no response.")
 
     reply = str(choices[0].get("message", {}).get("content", "")).strip()
     if not reply:
-        raise RuntimeError("OpenAI returned an empty response.")
+        raise RuntimeError("NVIDIA returned an empty response.")
 
-    return {"reply": reply, "provider": "openai", "model": model}
+    return {"reply": reply, "provider": "nvidia", "model": model}
 
 
 @app.post("/chat/")
@@ -142,9 +143,9 @@ def chat_support(payload: ChatPayload):
         raise HTTPException(status_code=400, detail="Message cannot be empty.")
 
     try:
-        return _chat_with_openai(payload)
+        return _chat_with_nvidia(payload)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"OpenAI: {exc}") from exc
+        raise HTTPException(status_code=502, detail=f"NVIDIA: {exc}") from exc
 
 
 @app.post("/predict/")

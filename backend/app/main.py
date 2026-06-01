@@ -17,8 +17,10 @@ app = FastAPI()
 SUPPORT_SYSTEM_PROMPT = (
     "You are a calm, supportive mental wellness assistant. "
     "Listen empathetically, offer grounding suggestions, and avoid diagnosis. "
-    "If the user expresses self-harm intent, strongly encourage immediate professional help and local emergency support."
-    "Format replies using Markdown. Use short paragraphs (2–4 sentences), separated by a blank line. When giving steps or actions, use numbered or bulleted lists. Add a one-line summary at the top. Keep language simple and empathetic. Avoid trailing/incomplete sentences."
+    "If the user expresses self-harm intent, strongly encourage immediate professional help and local emergency support. "
+    "Return a single JSON object only, with no markdown fences or extra commentary. "
+    "Use this schema: {\"summary\": string, \"paragraphs\": [string], \"bullets\": [string], \"closing_question\": string}. "
+    "Keep summary to one sentence. Use 1 to 3 short paragraphs. Use bullets only when giving concrete steps or options. Keep language simple and empathetic."
 )
 
 NEGATIVE_TEXT_CUES = {
@@ -149,6 +151,119 @@ def _extract_reply_text(message):
 
     reasoning = getattr(message, "reasoning_content", "")
     return str(reasoning or "").strip()
+
+
+def _strip_code_fences(text):
+    value = (text or "").strip()
+    if value.startswith("```"):
+        lines = value.splitlines()
+        if len(lines) >= 2:
+            first = lines[0].strip().lower()
+            if first.startswith("```json") or first == "```":
+                if lines[-1].strip().startswith("```"):
+                    return "\n".join(lines[1:-1]).strip()
+    return value
+
+
+def _parse_structured_reply(text):
+    raw_text = _strip_code_fences(text)
+    fallback = {
+        "summary": "",
+        "paragraphs": [],
+        "bullets": [],
+        "closing_question": "",
+    }
+
+    if not raw_text:
+        return fallback
+
+    try:
+        import json
+
+        data = json.loads(raw_text)
+        if not isinstance(data, dict):
+            return fallback
+
+        summary = str(data.get("summary", "") or "").strip()
+        paragraphs = data.get("paragraphs", []) or []
+        bullets = data.get("bullets", []) or []
+        closing_question = str(data.get("closing_question", "") or "").strip()
+
+        normalized_paragraphs = [str(item).strip() for item in paragraphs if str(item).strip()]
+        normalized_bullets = [str(item).strip() for item in bullets if str(item).strip()]
+
+        if not summary and normalized_paragraphs:
+            summary = normalized_paragraphs[0]
+
+        return {
+            "summary": summary,
+            "paragraphs": normalized_paragraphs,
+            "bullets": normalized_bullets,
+            "closing_question": closing_question,
+        }
+    except Exception:
+        pass
+
+    lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
+    paragraphs = []
+    bullets = []
+
+    for line in lines:
+        if line.startswith(('-', '*', '•', '1.', '2.', '3.', '4.', '5.')):
+            bullets.append(line.lstrip('-*•0123456789. ').strip())
+        else:
+            paragraphs.append(line)
+
+    summary = paragraphs[0] if paragraphs else raw_text.strip().split(". ")[0].strip()
+    body = paragraphs[1:] if len(paragraphs) > 1 else []
+    closing_question = ""
+    if raw_text.rstrip().endswith("?"):
+        closing_question = raw_text.rstrip().split("\n")[-1].strip()
+
+    return {
+        "summary": summary,
+        "paragraphs": body or paragraphs,
+        "bullets": bullets,
+        "closing_question": closing_question,
+    }
+
+
+def _render_structured_reply(reply_blocks):
+    sections = []
+
+    summary = (reply_blocks or {}).get("summary", "").strip()
+    if summary:
+        sections.append(summary)
+
+    for paragraph in (reply_blocks or {}).get("paragraphs", []):
+        paragraph_text = str(paragraph).strip()
+        if paragraph_text:
+            sections.append(paragraph_text)
+
+    bullets = [str(item).strip() for item in (reply_blocks or {}).get("bullets", []) if str(item).strip()]
+    if bullets:
+        sections.append("\n".join(f"- {item}" for item in bullets))
+
+    closing_question = (reply_blocks or {}).get("closing_question", "").strip()
+    if closing_question:
+        sections.append(closing_question)
+
+    return "\n\n".join(sections).strip()
+
+
+def _build_reply_payload(raw_reply, provider, model, extra=None):
+    reply_blocks = _parse_structured_reply(raw_reply)
+    rendered_reply = _render_structured_reply(reply_blocks) or str(raw_reply or "").strip()
+
+    payload = {
+        "reply": rendered_reply,
+        "reply_blocks": reply_blocks,
+        "provider": provider,
+        "model": model,
+    }
+    if extra:
+        payload.update(extra)
+    return payload
 
 
 def _looks_truncated(text, min_length=120):
@@ -299,11 +414,13 @@ def _chat_with_openrouter(payload: ChatPayload):
                         cont_max_tokens = min(max_tokens * 2, 800)
 
                     cont_messages = list(base_messages)
-                    # include the assistant's partial reply so the model can continue naturally
-                    cont_messages.append({"role": "assistant", "content": reply})
                     cont_messages.append({
                         "role": "user",
-                        "content": "Please continue your previous response from where it stopped, keeping the same supportive tone and style."
+                        "content": (
+                            "Your previous JSON response was cut off. Return the same answer again as one complete JSON object only, "
+                            "using the schema {\"summary\": string, \"paragraphs\": [string], \"bullets\": [string], \"closing_question\": string}. "
+                            "Do not add markdown fences or any extra commentary."
+                        ),
                     })
 
                     cont_body = {
@@ -321,13 +438,12 @@ def _chat_with_openrouter(payload: ChatPayload):
                             cont_msg = getattr(cont_choices[0], "message", None)
                             cont_text = _extract_reply_text(cont_msg)
                             if cont_text:
-                                full = (reply + "\n\n" + cont_text).strip()
-                                return {"reply": full, "provider": "nvidia", "model": candidate_model}
+                                return _build_reply_payload(cont_text, "nvidia", candidate_model)
                     except Exception as exc2:
                         last_error = f"{candidate_model} continuation attempt failed: {exc2}"
 
                 # Normal successful reply (not truncated or continuation failed)
-                return {"reply": reply, "provider": "nvidia", "model": candidate_model}
+                return _build_reply_payload(reply, "nvidia", candidate_model)
             except Exception as exc:
                 last_error = f"{candidate_model} attempt {idx}: {exc}"
                 # Gateway failures are usually transient service-side errors; move to next model quickly.
@@ -346,12 +462,12 @@ def chat_support(payload: ChatPayload):
         return _chat_with_openrouter(payload)
     except Exception as exc:
         if _parse_bool_env("CHAT_LOCAL_FALLBACK", default=True):
-            return {
-                "reply": _build_local_support_reply(payload.message),
-                "provider": "local-fallback",
-                "model": "support-template",
-                "upstream_error": f"OpenRouter: {exc}",
-            }
+            return _build_reply_payload(
+                _build_local_support_reply(payload.message),
+                "local-fallback",
+                "support-template",
+                extra={"upstream_error": f"OpenRouter: {exc}"},
+            )
         raise HTTPException(status_code=502, detail=f"OpenRouter: {exc}") from exc
 
 

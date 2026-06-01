@@ -8,6 +8,41 @@ import SidePanel from "../components/SidePanel";
 import { supabase } from "../lib/supabaseClient";
 import { sendSupportMessage } from "../lib/api";
 
+function AssistantReply({ blocks, text }) {
+  const paragraphs = Array.isArray(blocks?.paragraphs) ? blocks.paragraphs.filter(Boolean) : [];
+  const bullets = Array.isArray(blocks?.bullets) ? blocks.bullets.filter(Boolean) : [];
+
+  if (!blocks) {
+    return <div className="whitespace-pre-line">{text}</div>;
+  }
+
+  return (
+    <div className="space-y-3">
+      {blocks.summary ? <p className="text-[0.95rem] font-semibold text-white">{blocks.summary}</p> : null}
+
+      {paragraphs.map((paragraph, index) => (
+        <p key={`paragraph-${index}`} className="whitespace-pre-line">
+          {paragraph}
+        </p>
+      ))}
+
+      {bullets.length ? (
+        <ul className="space-y-2 pl-5">
+          {bullets.map((bullet, index) => (
+            <li key={`bullet-${index}`} className="list-disc whitespace-pre-line">
+              {bullet}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      {blocks.closing_question ? (
+        <p className="font-medium text-cyan-50 whitespace-pre-line">{blocks.closing_question}</p>
+      ) : null}
+    </div>
+  );
+}
+
 export default function ChatPage() {
   const router = useRouter();
   const [authReady, setAuthReady] = useState(false);
@@ -82,7 +117,10 @@ export default function ChatPage() {
         .map((msg) => ({ role: msg.role, text: msg.text }));
 
       const response = await sendSupportMessage(text, history);
-      setMessages((prev) => [...prev, { role: "assistant", text: response.reply }]);
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", text: response.reply, blocks: response.reply_blocks || null },
+      ]);
     } catch (error) {
       setMessages((prev) => [
         ...prev,
@@ -152,7 +190,7 @@ export default function ChatPage() {
                         : "border border-white/10 bg-white/10 text-white/90"
                     }`}
                   >
-                    {msg.text}
+                    {msg.role === "assistant" ? <AssistantReply blocks={msg.blocks} text={msg.text} /> : msg.text}
                   </motion.div>
                 ))}
               </div>

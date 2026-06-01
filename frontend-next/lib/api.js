@@ -1,5 +1,24 @@
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 
+function buildLocalSupportFallback() {
+  return {
+    reply:
+      "I am here with you.\n\nI may be having a temporary connection issue, but you are not alone. Tell me one thing that feels hardest right now, and we can break it into a small next step together.",
+    reply_blocks: {
+      summary: "I am here with you.",
+      paragraphs: [
+        "I may be having a temporary connection issue, but you are not alone.",
+        "Tell me one thing that feels hardest right now, and we can break it into a small next step together.",
+      ],
+      bullets: [],
+      closing_question: "What feels most supportable in this moment?",
+    },
+    provider: "local-fallback",
+    model: "support-template",
+    upstream_error: "Network error while reaching the support backend.",
+  };
+}
+
 async function parseResponse(response) {
   const contentType = response.headers.get("content-type") || "";
   const payload = contentType.includes("application/json") ? await response.json() : await response.text();
@@ -41,13 +60,19 @@ export async function clearHistory() {
 }
 
 export async function sendSupportMessage(message, history = []) {
-  const response = await fetch(`${API_BASE_URL}/chat/`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ message, history }),
-  });
+  let response;
+
+  try {
+    response = await fetch(`${API_BASE_URL}/chat/`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ message, history }),
+    });
+  } catch (error) {
+    return buildLocalSupportFallback();
+  }
 
   return parseResponse(response);
 }

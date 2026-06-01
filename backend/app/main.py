@@ -150,6 +150,36 @@ def _extract_reply_text(message):
     return str(reasoning or "").strip()
 
 
+def _looks_truncated(text, min_length=120):
+    """Return True if `text` appears to end abruptly and is likely truncated.
+
+    Heuristics:
+    - must be at least `min_length` characters to avoid short replies
+    - if it does not end with terminal punctuation or a closing quote/paren, consider it truncated
+    - if it ends with obvious truncation markers (ellipsis, em-dash, colon, header markers), consider truncated
+    """
+    if not text:
+        return False
+
+    s = str(text).strip()
+    if len(s) < min_length:
+        return False
+
+    # Characters that usually indicate a finished sentence
+    finished_chars = {'.', '!', '?', '…', '"', "'", '”', '’', ')', '}'}
+    if s[-1] in finished_chars:
+        return False
+
+    # Obvious truncation markers
+    trunc_markers = ('...', '..', '—', '–', ':', '###')
+    for m in trunc_markers:
+        if s.endswith(m):
+            return True
+
+    # If it doesn't end in a terminal punctuation and is reasonably long, assume truncated
+    return True
+
+
 def _resolve_model_candidates(primary_model):
     extras = os.getenv("OPENROUTER_FALLBACK_MODELS", "").strip()
     candidates = [primary_model]
@@ -244,10 +274,58 @@ def _chat_with_openrouter(payload: ChatPayload):
 
                 message = getattr(choices[0], "message", None)
                 reply = _extract_reply_text(message)
+                # If the model returned an empty reply, treat as error and continue
                 if not reply:
                     last_error = f"{candidate_model} attempt {idx}: NVIDIA returned an empty response."
                     continue
 
+                # Detect if the provider stopped due to token/length limits or looks truncated and try to continue
+                finish_reason = getattr(choices[0], "finish_reason", None)
+                should_continue = False
+                if finish_reason and str(finish_reason).lower() in {"length", "max_tokens", "token_limit"}:
+                    should_continue = True
+                else:
+                    # Also use heuristics when provider doesn't set a finish_reason
+                    try:
+                        should_continue = _looks_truncated(reply, min_length=int(os.getenv("OPENROUTER_CONTINUE_MIN_LENGTH", "120")))
+                    except Exception:
+                        should_continue = _looks_truncated(reply)
+
+                if should_continue:
+                    try:
+                        cont_max_tokens = int(os.getenv("OPENROUTER_CONTINUE_MAX_TOKENS", str(min(max_tokens * 2, 800))))
+                    except Exception:
+                        cont_max_tokens = min(max_tokens * 2, 800)
+
+                    cont_messages = list(base_messages)
+                    # include the assistant's partial reply so the model can continue naturally
+                    cont_messages.append({"role": "assistant", "content": reply})
+                    cont_messages.append({
+                        "role": "user",
+                        "content": "Please continue your previous response from where it stopped, keeping the same supportive tone and style."
+                    })
+
+                    cont_body = {
+                        "model": candidate_model,
+                        "messages": cont_messages,
+                        "max_tokens": cont_max_tokens,
+                        "temperature": cfg["temperature"],
+                        "stream": False,
+                    }
+
+                    try:
+                        cont_resp = client.chat.completions.create(**cont_body)
+                        cont_choices = getattr(cont_resp, "choices", []) or []
+                        if cont_choices:
+                            cont_msg = getattr(cont_choices[0], "message", None)
+                            cont_text = _extract_reply_text(cont_msg)
+                            if cont_text:
+                                full = (reply + "\n\n" + cont_text).strip()
+                                return {"reply": full, "provider": "nvidia", "model": candidate_model}
+                    except Exception as exc2:
+                        last_error = f"{candidate_model} continuation attempt failed: {exc2}"
+
+                # Normal successful reply (not truncated or continuation failed)
                 return {"reply": reply, "provider": "nvidia", "model": candidate_model}
             except Exception as exc:
                 last_error = f"{candidate_model} attempt {idx}: {exc}"

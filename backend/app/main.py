@@ -167,22 +167,15 @@ def _strip_code_fences(text):
 
 def _parse_structured_reply(text):
     raw_text = _strip_code_fences(text)
-    fallback = {
-        "summary": "",
-        "paragraphs": [],
-        "bullets": [],
-        "closing_question": "",
-    }
-
     if not raw_text:
-        return fallback
+        return None
 
     try:
         import json
 
         data = json.loads(raw_text)
         if not isinstance(data, dict):
-            return fallback
+            return None
 
         summary = str(data.get("summary", "") or "").strip()
         paragraphs = data.get("paragraphs", []) or []
@@ -202,30 +195,7 @@ def _parse_structured_reply(text):
             "closing_question": closing_question,
         }
     except Exception:
-        pass
-
-    lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
-    paragraphs = []
-    bullets = []
-
-    for line in lines:
-        if line.startswith(('-', '*', '•', '1.', '2.', '3.', '4.', '5.')):
-            bullets.append(line.lstrip('-*•0123456789. ').strip())
-        else:
-            paragraphs.append(line)
-
-    summary = paragraphs[0] if paragraphs else raw_text.strip().split(". ")[0].strip()
-    body = paragraphs[1:] if len(paragraphs) > 1 else []
-    closing_question = ""
-    if raw_text.rstrip().endswith("?"):
-        closing_question = raw_text.rstrip().split("\n")[-1].strip()
-
-    return {
-        "summary": summary,
-        "paragraphs": body or paragraphs,
-        "bullets": bullets,
-        "closing_question": closing_question,
-    }
+        return None
 
 
 def _render_structured_reply(reply_blocks):
@@ -253,7 +223,10 @@ def _render_structured_reply(reply_blocks):
 
 def _build_reply_payload(raw_reply, provider, model, extra=None):
     reply_blocks = _parse_structured_reply(raw_reply)
-    rendered_reply = _render_structured_reply(reply_blocks) or str(raw_reply or "").strip()
+    if reply_blocks:
+        rendered_reply = _render_structured_reply(reply_blocks) or str(raw_reply or "").strip()
+    else:
+        rendered_reply = str(raw_reply or "").strip()
 
     payload = {
         "reply": rendered_reply,
@@ -298,7 +271,7 @@ def _looks_truncated(text, min_length=120):
 
 def _resolve_model_candidates(primary_model):
     extras = os.getenv("OPENROUTER_FALLBACK_MODELS", "").strip()
-    candidates = [primary_model]
+    candidates = [(primary_model or "").strip()]
 
     if extras:
         candidates.extend(m.strip() for m in extras.split(",") if m.strip())

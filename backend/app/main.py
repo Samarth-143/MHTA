@@ -98,10 +98,10 @@ def _build_openai_messages(history, latest_message):
     return messages
 
 
-def _resolve_nvidia_base_url(base_url):
+def _resolve_openrouter_base_url(base_url):
     cleaned = (base_url or "").strip().rstrip("/")
     if not cleaned:
-        cleaned = "https://integrate.api.nvidia.com"
+        cleaned = "https://openrouter.ai/api/v1"
 
     if cleaned.endswith("/chat/completions"):
         cleaned = cleaned[: -len("/chat/completions")]
@@ -151,9 +151,8 @@ def _extract_reply_text(message):
 
 
 def _resolve_model_candidates(primary_model):
-    extras = os.getenv("NVIDIA_FALLBACK_MODELS", "").strip()
-    # Include a lightweight default fallback for better uptime when primary model is unavailable.
-    candidates = [primary_model, "meta/llama-3.1-8b-instruct"]
+    extras = os.getenv("OPENROUTER_FALLBACK_MODELS", "").strip()
+    candidates = [primary_model]
 
     if extras:
         candidates.extend(m.strip() for m in extras.split(",") if m.strip())
@@ -186,21 +185,28 @@ def _build_local_support_reply(user_message):
     )
 
 
-def _chat_with_nvidia(payload: ChatPayload):
-    api_key = os.getenv("NVIDIA_API_KEY", "").strip()
+def _chat_with_openrouter(payload: ChatPayload):
+    api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
     if not api_key:
-        raise RuntimeError("NVIDIA API key is missing on the server.")
+        raise RuntimeError("OpenRouter API key is missing on the server.")
 
-    model = os.getenv("NVIDIA_MODEL", "z-ai/glm4.7").strip() or "z-ai/glm4.7"
+    model = os.getenv("OPENROUTER_MODEL", "nvidia/nemotron-3-super").strip() or "nvidia/nemotron-3-super"
     model_candidates = _resolve_model_candidates(model)
-    base_url = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com").strip().rstrip("/")
-    resolved_base_url = _resolve_nvidia_base_url(base_url)
-    timeout_seconds = float(os.getenv("NVIDIA_TIMEOUT_SECONDS", "25"))
-    retry_timeout_seconds = float(os.getenv("NVIDIA_TIMEOUT_RETRY_SECONDS", str(max(timeout_seconds + 20, 45))))
-    max_tokens = int(os.getenv("NVIDIA_MAX_TOKENS", "300"))
-    retry_max_tokens = int(os.getenv("NVIDIA_RETRY_MAX_TOKENS", str(min(max_tokens, 180))))
-    enable_thinking = _parse_bool_env("NVIDIA_ENABLE_THINKING", default=False)
+    base_url = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1").strip().rstrip("/")
+    resolved_base_url = _resolve_openrouter_base_url(base_url)
+    timeout_seconds = float(os.getenv("OPENROUTER_TIMEOUT_SECONDS", "25"))
+    retry_timeout_seconds = float(os.getenv("OPENROUTER_TIMEOUT_RETRY_SECONDS", str(max(timeout_seconds + 20, 45))))
+    max_tokens = int(os.getenv("OPENROUTER_MAX_TOKENS", "300"))
+    retry_max_tokens = int(os.getenv("OPENROUTER_RETRY_MAX_TOKENS", str(min(max_tokens, 180))))
     base_messages = _build_openai_messages(payload.history, payload.message)
+    default_headers = {}
+
+    site_url = os.getenv("OPENROUTER_SITE_URL", "").strip()
+    app_name = os.getenv("OPENROUTER_APP_NAME", "").strip()
+    if site_url:
+        default_headers["HTTP-Referer"] = site_url
+    if app_name:
+        default_headers["X-OpenRouter-Title"] = app_name
 
     last_error = None
     for candidate_model in model_candidates:
@@ -210,8 +216,6 @@ def _chat_with_nvidia(payload: ChatPayload):
             "temperature": 0.4,
             "stream": False,
         }
-        if enable_thinking:
-            request_template["extra_body"] = {"chat_template_kwargs": {"enable_thinking": True, "clear_thinking": False}}
 
         attempt_configs = [
             {"timeout": timeout_seconds, "max_tokens": max_tokens, "temperature": 0.4},
@@ -223,7 +227,13 @@ def _chat_with_nvidia(payload: ChatPayload):
             request_body["max_tokens"] = cfg["max_tokens"]
             request_body["temperature"] = cfg["temperature"]
 
-            client = OpenAI(base_url=resolved_base_url, api_key=api_key, timeout=cfg["timeout"], max_retries=1)
+            client = OpenAI(
+                base_url=resolved_base_url,
+                api_key=api_key,
+                timeout=cfg["timeout"],
+                max_retries=1,
+                default_headers=default_headers or None,
+            )
 
             try:
                 response = client.chat.completions.create(**request_body)
@@ -245,7 +255,7 @@ def _chat_with_nvidia(payload: ChatPayload):
                 if _is_gateway_error(exc):
                     break
 
-    raise RuntimeError(f"NVIDIA request failed: {last_error} (base_url: {resolved_base_url})")
+    raise RuntimeError(f"OpenRouter request failed: {last_error} (base_url: {resolved_base_url})")
 
 
 @app.post("/chat/")
@@ -254,16 +264,16 @@ def chat_support(payload: ChatPayload):
         raise HTTPException(status_code=400, detail="Message cannot be empty.")
 
     try:
-        return _chat_with_nvidia(payload)
+        return _chat_with_openrouter(payload)
     except Exception as exc:
         if _parse_bool_env("CHAT_LOCAL_FALLBACK", default=True):
             return {
                 "reply": _build_local_support_reply(payload.message),
                 "provider": "local-fallback",
                 "model": "support-template",
-                "upstream_error": f"NVIDIA: {exc}",
+                "upstream_error": f"OpenRouter: {exc}",
             }
-        raise HTTPException(status_code=502, detail=f"NVIDIA: {exc}") from exc
+        raise HTTPException(status_code=502, detail=f"OpenRouter: {exc}") from exc
 
 
 @app.post("/predict/")

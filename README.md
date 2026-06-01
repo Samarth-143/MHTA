@@ -19,7 +19,7 @@ A full-stack app that analyzes emotion from voice, tracks mood trends over time,
 - Lets users write daily diary entries
 - Computes diary sentiment (positive/neutral/negative)
 - Shows calendar-based day view with affirmation + diary sentiment
-- Includes a support chatbot powered by NVIDIA API (GLM 4.7)
+- Includes a support chatbot powered by OpenRouter with NVIDIA Nemotron 3 Super
 - Supports user auth and per-user storage with Supabase
 
 ## Tech stack
@@ -39,7 +39,7 @@ A full-stack app that analyzes emotion from voice, tracks mood trends over time,
 - `POST /predict/` - analyze audio and return emotion + trend
 - `GET /history/` - fetch stored emotion history
 - `DELETE /clear/` - clear stored emotion history
-- `POST /chat/` - send a support chat message (NVIDIA-backed)
+- `POST /chat/` - send a support chat message (OpenRouter-backed)
 
 ## Local setup
 
@@ -88,19 +88,23 @@ In your Hugging Face Space settings, add:
 ```env
 CORS_ORIGINS=https://your-project.vercel.app
 MODEL_URL=https://raw.githubusercontent.com/Samarth-143/MHTA/main/backend/models/emotion_model.h5
-NVIDIA_API_KEY=your_nvidia_api_key
-NVIDIA_MODEL=z-ai/glm4.7
+OPENROUTER_API_KEY=your_openrouter_api_key
+OPENROUTER_MODEL=nvidia/nemotron-3-super
+# Optional attribution headers for OpenRouter
+OPENROUTER_SITE_URL=https://your-project.vercel.app
+OPENROUTER_APP_NAME=MHTA Backend
 # Optional tuning for latency/reliability
-NVIDIA_ENABLE_THINKING=false
-NVIDIA_TIMEOUT_SECONDS=25
-NVIDIA_TIMEOUT_RETRY_SECONDS=45
-NVIDIA_MAX_TOKENS=300
-NVIDIA_RETRY_MAX_TOKENS=180
+OPENROUTER_TIMEOUT_SECONDS=25
+OPENROUTER_TIMEOUT_RETRY_SECONDS=45
+OPENROUTER_MAX_TOKENS=300
+OPENROUTER_RETRY_MAX_TOKENS=180
 CHAT_LOCAL_FALLBACK=true
 # Comma-separated fallback models (optional)
-# NVIDIA_FALLBACK_MODELS=meta/llama-3.1-8b-instruct
+# OPENROUTER_FALLBACK_MODELS=nvidia/nemotron-4-340b-instruct,meta-llama/llama-3.1-8b-instruct
 ```
 
-Use `NVIDIA_API_KEY` under Secrets, and keep `NVIDIA_MODEL`, `CORS_ORIGINS`, and `MODEL_URL` under Variables.
+Use `OPENROUTER_API_KEY` under Secrets, and keep `OPENROUTER_MODEL`, `OPENROUTER_SITE_URL`, `OPENROUTER_APP_NAME`, `CORS_ORIGINS`, and `MODEL_URL` under Variables.
 Do not create the same name in both Variables and Secrets, or Hugging Face will raise a collision error.
+
+For OpenRouter, make sure the model slug matches the one on the model page. If `nvidia/nemotron-3-super` is not available in your account, replace it with the exact slug OpenRouter shows for the Nemotron model you want.
 

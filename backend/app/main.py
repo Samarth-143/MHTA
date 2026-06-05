@@ -444,6 +444,163 @@ def chat_support(payload: ChatPayload):
         raise HTTPException(status_code=502, detail=f"OpenRouter: {exc}") from exc
 
 
+# ---- Diary sentiment (OpenRouter) ----
+
+class SentimentPayload(BaseModel):
+    text: str
+
+
+SENTIMENT_SYSTEM_PROMPT = (
+    "You are a mental-wellness sentiment classifier for diary entries. "
+    "Return a single JSON object only (no markdown fences, no extra text). "
+    "Use this schema: "
+    "{\"label\": string, \"tone\": string, \"detail\": string, \"score\": number, \"comparative\": number}. "
+    "\nRules: "
+    "- label must be one of: 'Positive', 'Neutral', 'Needs Support'. "
+    "- tone must be a Tailwind text color class: 'text-emerald-200', 'text-amber-100', or 'text-rose-200'. "
+    "- score and comparative are numbers (use any reasonable scale, but keep them consistent). "
+    "- detail should be 1 short supportive sentence describing the detected sentiment. "
+)
+
+
+def _build_sentiment_prompt(text: str) -> str:
+    return (
+        "Classify the sentiment of this diary entry and return the JSON schema. "
+        "Diary entry:\n"
+        f"{text}"
+    )
+
+
+def _sentiment_with_openrouter(text: str):
+    api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("OpenRouter API key is missing on the server.")
+
+    model = os.getenv("OPENROUTER_SENTIMENT_MODEL", "anthropic/claude-3").strip() or "anthropic/claude-3"
+    model_candidates = _resolve_model_candidates(model)
+
+    base_url = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1").strip().rstrip("/")
+    resolved_base_url = _resolve_openrouter_base_url(base_url)
+
+    timeout_seconds = float(os.getenv("OPENROUTER_TIMEOUT_SECONDS", "25"))
+    max_tokens = int(os.getenv("OPENROUTER_MAX_TOKENS", "300"))
+
+    site_url = os.getenv("OPENROUTER_SITE_URL", "").strip()
+    app_name = os.getenv("OPENROUTER_APP_NAME", "").strip()
+
+    default_headers = {}
+    if site_url:
+        default_headers["HTTP-Referer"] = site_url
+    if app_name:
+        default_headers["X-OpenRouter-Title"] = app_name
+
+    messages = [
+        {"role": "system", "content": SENTIMENT_SYSTEM_PROMPT},
+        {"role": "user", "content": _build_sentiment_prompt(text)},
+    ]
+
+    last_error = None
+    for candidate_model in model_candidates:
+        for idx, cfg in enumerate(
+            [
+                {"timeout": timeout_seconds, "max_tokens": max_tokens, "temperature": 0.2},
+                {"timeout": max(timeout_seconds + 10, 35), "max_tokens": max(min(max_tokens, 220), 150), "temperature": 0.1},
+            ],
+            start=1,
+        ):
+            try:
+                client = OpenAI(
+                    base_url=resolved_base_url,
+                    api_key=api_key,
+                    timeout=cfg["timeout"],
+                    max_retries=1,
+                    default_headers=default_headers or None,
+                )
+
+                request_body = {
+                    "model": candidate_model,
+                    "messages": messages,
+                    "temperature": cfg["temperature"],
+                    "max_tokens": cfg["max_tokens"],
+                    "stream": False,
+                }
+
+                response = client.chat.completions.create(**request_body)
+                choices = getattr(response, "choices", []) or []
+                if not choices:
+                    last_error = f"{candidate_model} attempt {idx}: NVIDIA returned no response."
+                    continue
+
+                message = getattr(choices[0], "message", None)
+                reply = _extract_reply_text(message)
+                if not reply:
+                    last_error = f"{candidate_model} attempt {idx}: NVIDIA returned empty response."
+                    continue
+
+                parsed = _parse_structured_reply(reply)
+                if not parsed:
+                    # Fallback: attempt parsing raw JSON without schema enforcement
+                    parsed = None
+
+                # If parsing fails, try to coerce a minimal response
+                if not parsed:
+                    # Return safe defaults rather than failing the endpoint
+                    return {
+                        "label": "Neutral",
+                        "tone": "text-amber-100",
+                        "detail": "Your writing appears balanced overall.",
+                        "score": 0,
+                        "comparative": 0,
+                    }
+
+                # Map model JSON keys to frontend expectations
+                label = parsed.get("label") or "Neutral"
+                tone = parsed.get("tone") or (
+                    "text-emerald-200" if label == "Positive" else ("text-rose-200" if label == "Needs Support" else "text-amber-100")
+                )
+                detail = parsed.get("detail") or "Your writing appears balanced overall."
+
+                score = parsed.get("score") if parsed.get("score") is not None else 0
+                comparative = parsed.get("comparative") if parsed.get("comparative") is not None else 0
+
+                return {
+                    "label": label,
+                    "tone": tone,
+                    "detail": detail,
+                    "score": score,
+                    "comparative": comparative,
+                }
+
+            except Exception as exc:
+                last_error = f"{candidate_model} attempt {idx}: {exc}"
+
+    raise RuntimeError(f"OpenRouter sentiment request failed: {last_error}")
+
+
+
+
+@app.post("/sentiment/")
+def sentiment_diary(payload: SentimentPayload):
+    text = (payload.text or "").strip()
+
+    if not text:
+        raise HTTPException(status_code=400, detail="Text cannot be empty.")
+
+    try:
+        return _sentiment_with_openrouter(text)
+    except Exception as exc:
+        # Keep diary UX functional
+        return {
+            "label": "Neutral",
+            "tone": "text-amber-100",
+            "detail": "Your writing appears balanced overall.",
+            "score": 0,
+            "comparative": 0,
+            "upstream_error": str(exc),
+        }
+
+
+
 @app.post("/predict/")
 async def predict(file: UploadFile = File(...), language: str = Form(default="auto")):
     if not file.filename:

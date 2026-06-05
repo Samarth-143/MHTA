@@ -1,29 +1,27 @@
 import { motion } from "framer-motion";
 import { useState } from "react";
-import { analyzeSentimentText } from "../lib/sentimentAnalysis";
+import { analyzeDiarySentiment } from "../lib/api";
+
 
 export default function Diary({ value, onChange, onSave }) {
   const [savedSentiment, setSavedSentiment] = useState(null);
+
   const [isSaving, setIsSaving] = useState(false);
 
   async function handleSaveClick() {
     const currentText = (value || "").trim();
-    if (!currentText) {
-      return;
-    }
+    if (!currentText) return;
 
-    const sentimentSnapshot = analyzeSentimentText(currentText, {
-      emptyDetail: "Start writing to see sentiment.",
-    });
     setIsSaving(true);
-
     try {
+      const sentimentSnapshot = await analyzeDiarySentiment(currentText);
       await Promise.resolve(onSave?.());
       setSavedSentiment(sentimentSnapshot);
     } finally {
       setIsSaving(false);
     }
   }
+
 
   return (
     <motion.section

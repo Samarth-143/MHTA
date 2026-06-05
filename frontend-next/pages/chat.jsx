@@ -8,7 +8,7 @@ import SidePanel from "../components/SidePanel";
 import { supabase } from "../lib/supabaseClient";
 import { sendSupportMessage } from "../lib/api";
 
-function AssistantReply({ blocks, text }) {
+function AssistantReply({ blocks, text, provider, upstreamError }) {
   const paragraphs = Array.isArray(blocks?.paragraphs) ? blocks.paragraphs.filter(Boolean) : [];
   const bullets = Array.isArray(blocks?.bullets) ? blocks.bullets.filter(Boolean) : [];
 
@@ -38,6 +38,10 @@ function AssistantReply({ blocks, text }) {
 
       {blocks.closing_question ? (
         <p className="font-medium text-cyan-50 whitespace-pre-line">{blocks.closing_question}</p>
+      ) : null}
+
+      {provider === "local-fallback" && upstreamError ? (
+        <p className="text-xs text-white/50">Fallback used: {upstreamError}</p>
       ) : null}
     </div>
   );
@@ -119,7 +123,13 @@ export default function ChatPage() {
       const response = await sendSupportMessage(text, history);
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", text: response.reply, blocks: response.reply_blocks || null },
+        {
+          role: "assistant",
+          text: response.reply,
+          blocks: response.reply_blocks || null,
+          provider: response.provider,
+          upstreamError: response.upstream_error,
+        },
       ]);
     } catch (error) {
       setMessages((prev) => [
@@ -190,7 +200,16 @@ export default function ChatPage() {
                         : "border border-white/10 bg-white/10 text-white/90"
                     }`}
                   >
-                    {msg.role === "assistant" ? <AssistantReply blocks={msg.blocks} text={msg.text} /> : msg.text}
+                    {msg.role === "assistant" ? (
+                      <AssistantReply
+                        blocks={msg.blocks}
+                        text={msg.text}
+                        provider={msg.provider}
+                        upstreamError={msg.upstreamError}
+                      />
+                    ) : (
+                      msg.text
+                    )}
                   </motion.div>
                 ))}
               </div>
